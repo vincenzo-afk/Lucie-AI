@@ -74,8 +74,11 @@ export function createEmotionAnimator(model) {
 
     // 6. Live lip-sync overrides mouth openness while TTS audio is playing.
     const lipLevel = getLipSyncLevel();
-    if (lipLevel > 0.01) {
-      setParamRaw('ParamMouthOpenY', Math.min(1, lipLevel * 1.4));
+    if (lipLevel > 0.005) {
+      // Scale RMS level (0.01..0.15) to a visible mouth opening (0.2..1.0)
+      const openAmount = Math.min(1, Math.pow(lipLevel * 5.0, 0.7));
+      setParamRaw('ParamMouthOpenY', openAmount);
+      setParamRaw('ParamMouthForm', 0.3); // slight smile while talking
     }
   }
 

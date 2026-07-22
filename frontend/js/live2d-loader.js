@@ -1,61 +1,49 @@
-// Loads the LucieSD3 Cubism 4 model onto a PIXI canvas.
+// Loads the LucieSD3 Cubism 5 model onto a PIXI canvas.
 // Relies on two globals loaded via <script> tags in index.html:
 //   - window.Live2DCubismCore  (from live2d/core/live2dcubismcore.min.js)
 //   - window.PIXI, window.PIXI.live2d.Live2DModel  (from the CDN bundles)
 
 const MODEL_PATH = 'model/LucieSD3/LucieSD3.model3.json';
 
-
 export async function initLive2D(canvasEl) {
   if (!window.PIXI || !window.PIXI.live2d) {
-    throw new Error('PIXI / pixi-live2d-display did not load. Check your internet connection or the CDN script tags in index.html.');
+    throw new Error('PIXI / untitled-pixi-live2d-engine did not load.');
   }
   if (!window.Live2DCubismCore) {
-    throw new Error('Live2D Cubism Core did not load. Make sure the SDK zip was extracted into frontend/live2d/core/.');
+    throw new Error('Live2D Cubism Core did not load.');
   }
 
-  const app = new PIXI.Application({
-    view: canvasEl,
+  const { Live2DModel, Live2DPlugin } = PIXI.live2d;
+
+  // PIXI 8 requires explicit plugin registration before app initialization
+  PIXI.extensions.add(Live2DPlugin);
+
+  // PixiJS v8 Application setup - MUST force WebGL preference as Live2D WebAssembly SDK is WebGL only
+  const app = new PIXI.Application();
+  await app.init({
+    canvas: canvasEl,
     resizeTo: canvasEl.parentElement,
+    preference: 'webgl',
     backgroundAlpha: 0,
     antialias: true,
     autoDensity: true,
     resolution: window.devicePixelRatio || 1,
-    autoStart: false,
   });
 
-  const { Live2DModel } = PIXI.live2d;
-  const model = await Live2DModel.from(MODEL_PATH);
+  // Load the model
+  const model = await Live2DModel.from(MODEL_PATH, { autoInteract: false });
 
-  // Ensure model textures are fully loaded before adding to stage
-  if (!model.textures || model.textures.length === 0 || !model.textures[0]) {
-    await new Promise((resolve) => {
-      model.once('load', resolve);
-      setTimeout(resolve, 800);
-    });
-  }
-
-  // Safety draw guard: prevent doDrawModel crashes if textures are unready on any frame
-  if (model.draw) {
-    const origDraw = model.draw.bind(model);
-    model.draw = function (renderer) {
-      if (!this.textures || !this.textures.length || !this.textures[0]) return;
+  // Guard model.renderLive2D against initial frame texture loading race conditions
+  if (typeof model.renderLive2D === 'function') {
+    const origRenderLive2D = model.renderLive2D.bind(model);
+    let errorCount = 0;
+    model.renderLive2D = function (...args) {
       try {
-        origDraw(renderer);
-      } catch (e) {
-        // Skip unready frame safely
-      }
-    };
-  }
-
-  if (model._render) {
-    const origRender = model._render.bind(model);
-    model._render = function (renderer) {
-      if (!this.textures || !this.textures.length || !this.textures[0]) return;
-      try {
-        origRender(renderer);
-      } catch (e) {
-        // Skip unready frame safely
+        return origRenderLive2D(...args);
+      } catch (err) {
+        if (errorCount++ < 5) {
+          console.warn('[live2d render error]:', err.message, err);
+        }
       }
     };
   }
@@ -69,27 +57,21 @@ export async function initLive2D(canvasEl) {
     model.internalModel.eyeBlink = null;
   }
 
-  // Start PIXI ticker once model and guards are set up
-  app.start();
-
   return { app, model };
-
-
-
 }
 
 function fitModel(model, app) {
   if (!model || !app) return;
-  const targetHeightRatio = 0.88;
-  const rendererHeight = app.renderer ? app.renderer.height : window.innerHeight;
-  const rendererWidth = app.renderer ? app.renderer.width : window.innerWidth;
+  // In PIXI 8, app.canvas replaces app.view
+  const rendererHeight = app.canvas.parentElement ? app.canvas.parentElement.clientHeight : window.innerHeight;
+  const rendererWidth  = app.canvas.parentElement ? app.canvas.parentElement.clientWidth  : window.innerWidth;
 
-  let modelHeight = model.height;
-  if (!modelHeight || isNaN(modelHeight) || modelHeight <= 0) {
-    modelHeight = 1000; // fallback height if bounds are uncalculated
+  let modelHeight = 1000;
+  if (model.internalModel && model.internalModel.height) {
+    modelHeight = model.internalModel.height;
   }
 
-  const scale = (rendererHeight * targetHeightRatio) / modelHeight;
+  const scale = (rendererHeight * 0.88) / modelHeight;
   if (!isFinite(scale) || scale <= 0) return;
 
   model.scale.set(scale);
@@ -99,4 +81,3 @@ function fitModel(model, app) {
     model.anchor.set(0.5, 0);
   }
 }
-

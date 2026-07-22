@@ -92,16 +92,17 @@ async def get_reply_from_audio(audio_bytes: bytes, mime_type: str, memory_contex
         return _extract_json(response.text)
     except Exception as e:
         logger.error("Gemini audio reply error: %s", e)
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+        error_str = str(e)
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
             return {
                 "emotion": "worried",
-                "text": "I can hear you, but your Gemini API Key exceeded its free quota! Please check your key on AI Studio.",
-                "transcript": "[Audio Heard]"
+                "text": "I heard you, but your Gemini API Key rate limit was hit! Please retry in a few seconds.",
+                "transcript": "[Rate Limit Hit]"
             }
         return {
-            "emotion": "happy",
-            "text": "Hey there! I heard you! How's your day going?",
-            "transcript": "[Voice Message]"
+            "emotion": "worried",
+            "text": f"Gemini API error: {error_str[:120]}",
+            "transcript": "[API Error]"
         }
 
 
@@ -135,8 +136,6 @@ async def get_reply_from_text(user_text: str, memory_context: str) -> dict:
             "transcript": user_text
         }
 
-    return _extract_json(response.text)
-
 
 async def synthesize_speech(text: str) -> bytes:
     """
@@ -159,3 +158,4 @@ async def synthesize_speech(text: str) -> bytes:
     )
     part = response.candidates[0].content.parts[0]
     return part.inline_data.data
+

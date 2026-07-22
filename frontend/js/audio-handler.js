@@ -1,9 +1,9 @@
 // Handles two audio paths:
-//   1. Mic capture (hold-to-talk) -> base64 chunk sent over the WebSocket
+//   1. Mic capture with auto-silence VAD -> base64 chunk sent over WebSocket
 //   2. TTS playback -> decoded + analysed live so emotion-animator can drive
-//      lip sync and the subtitle glow off the actual voice amplitude.
+//      lip sync and subtitle glow off actual voice amplitude.
 
-export function createAudioHandler({ onLipSyncLevel } = {}) {
+export function createAudioHandler({ onLipSyncLevel, onPlaybackEnd } = {}) {
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
   let mediaRecorder = null;
@@ -15,10 +15,25 @@ export function createAudioHandler({ onLipSyncLevel } = {}) {
   let currentLevel = 0;
   let playingSource = null;
 
-  // ---------- mic capture ----------
+  let micAnalyser = null;
+  let micAnalyserData = null;
+  let vadSilenceTimer = null;
+  let hasSpoken = false;
+  let isMonitoringVad = false;
 
-  async function startRecording() {
+  // ---------- mic capture + VAD ----------
+
+  async function startRecording({ onSpeechStart, onSpeechEnd } = {}) {
+    await audioCtx.resume();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Mic volume analyzer for silence detection
+    const micSource = audioCtx.createMediaStreamSource(stream);
+    micAnalyser = audioCtx.createAnalyser();
+    micAnalyser.fftSize = 256;
+    micAnalyserData = new Uint8Array(micAnalyser.frequencyBinCount);
+    micSource.connect(micAnalyser);
+
     recordingMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
@@ -29,21 +44,74 @@ export function createAudioHandler({ onLipSyncLevel } = {}) {
       if (e.data.size > 0) recordedChunks.push(e.data);
     };
 
+    hasSpoken = false;
+    if (vadSilenceTimer) {
+      clearTimeout(vadSilenceTimer);
+      vadSilenceTimer = null;
+    }
+
     mediaRecorder.start(100);
+    isMonitoringVad = true;
+    monitorMicVAD({ onSpeechStart, onSpeechEnd });
   }
 
+  function monitorMicVAD({ onSpeechStart, onSpeechEnd }) {
+    if (!isMonitoringVad || !micAnalyser || !mediaRecorder || mediaRecorder.state !== 'recording') return;
+
+    micAnalyser.getByteTimeDomainData(micAnalyserData);
+    let sumSquares = 0;
+    for (let i = 0; i < micAnalyserData.length; i++) {
+      const v = (micAnalyserData[i] - 128) / 128;
+      sumSquares += v * v;
+    }
+    const level = Math.sqrt(sumSquares / micAnalyserData.length);
+
+    if (level > 0.025) { // Voice activity threshold
+      if (!hasSpoken) {
+        hasSpoken = true;
+        onSpeechStart?.();
+      }
+      if (vadSilenceTimer) {
+        clearTimeout(vadSilenceTimer);
+        vadSilenceTimer = null;
+      }
+    } else if (hasSpoken && !vadSilenceTimer) {
+      // 1.2s silence after speech -> trigger auto-send
+      vadSilenceTimer = setTimeout(() => {
+        vadSilenceTimer = null;
+        isMonitoringVad = false;
+        onSpeechEnd?.();
+      }, 1200);
+    }
+
+    if (isMonitoringVad && mediaRecorder && mediaRecorder.state === 'recording') {
+      requestAnimationFrame(() => monitorMicVAD({ onSpeechStart, onSpeechEnd }));
+    }
+  }
 
   function stopRecording() {
+    isMonitoringVad = false;
+    if (vadSilenceTimer) {
+      clearTimeout(vadSilenceTimer);
+      vadSilenceTimer = null;
+    }
     return new Promise((resolve) => {
       if (!mediaRecorder) return resolve(null);
       mediaRecorder.onstop = async () => {
         const blob = new Blob(recordedChunks, { type: recordingMimeType });
-        mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+        if (mediaRecorder.stream) {
+          mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+        }
         if (blob.size === 0) return resolve(null);
         const base64 = await blobToBase64(blob);
-        resolve({ base64, mimeType: recordingMimeType.split(';')[0] });
+        const mimeForServer = recordingMimeType.split(';')[0];
+        resolve({ base64, mimeType: mimeForServer });
       };
-      mediaRecorder.stop();
+      if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      } else {
+        resolve(null);
+      }
     });
   }
 
@@ -82,7 +150,6 @@ export function createAudioHandler({ onLipSyncLevel } = {}) {
       playingSource = null;
       onPlaybackEnd?.();
     };
-
 
     playingSource = source;
     source.start();
