@@ -101,9 +101,10 @@ export function createEmotionAnimator(model) {
 function neutralTarget() {
   return {
     ParamEyeLOpen: 1.0, ParamEyeROpen: 1.0,
-    ParamEyeLSmile: 0.0, ParamEyeRSmile: 0.0,
-    ParamMouthForm: 0.0, ParamMouthOpenY: 0.0, ParamCheek: 0.0,
+    ParamMouthForm: 0.0, ParamMouthOpenY: 0.0,
     ParamBrowLY: 0.0, ParamBrowRY: 0.0,
+    ParamBrowLAngle: 0.0, ParamBrowRAngle: 0.0,
+    ParamBrowLForm: 0.0, ParamBrowRForm: 0.0,
   };
 }
 
