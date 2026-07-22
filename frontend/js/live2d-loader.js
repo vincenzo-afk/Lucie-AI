@@ -79,10 +79,24 @@ export async function initLive2D(canvasEl) {
 }
 
 function fitModel(model, app) {
-  const targetHeightRatio = 0.92; // leave a little headroom above her head
-  const scale = (app.renderer.height * targetHeightRatio) / model.height;
+  if (!model || !app) return;
+  const targetHeightRatio = 0.88;
+  const rendererHeight = app.renderer ? app.renderer.height : window.innerHeight;
+  const rendererWidth = app.renderer ? app.renderer.width : window.innerWidth;
+
+  let modelHeight = model.height;
+  if (!modelHeight || isNaN(modelHeight) || modelHeight <= 0) {
+    modelHeight = 1000; // fallback height if bounds are uncalculated
+  }
+
+  const scale = (rendererHeight * targetHeightRatio) / modelHeight;
+  if (!isFinite(scale) || scale <= 0) return;
+
   model.scale.set(scale);
-  model.x = app.renderer.width / 2;
-  model.y = app.renderer.height * (1 - targetHeightRatio) + model.height * scale * 0.02;
-  model.anchor.set(0.5, 0);
+  model.x = rendererWidth / 2;
+  model.y = rendererHeight * 0.05;
+  if (model.anchor && typeof model.anchor.set === 'function') {
+    model.anchor.set(0.5, 0);
+  }
 }
+
