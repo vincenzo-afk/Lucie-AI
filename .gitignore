@@ -1,0 +1,17 @@
+# Environment variables
+.env
+
+# Virtual environment & python cache
+.venv/
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Live2D third-party assets (licensed)
+model/
+frontend/model
+
+# OS / Editor files
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,189 @@
+:root {
+  --bg-void: #06060b;
+  --bg-deep: #0d0d17;
+  --bg-glow: #1b1830;
+  --violet: #b98bff;
+  --violet-soft: rgba(185, 139, 255, 0.55);
+  --pink: #ff8fd0;
+  --text-soft: #d9d5f0;
+  --text-dim: #7a7694;
+
+  --glow-level: 0; /* 0..1, driven live by audio-handler.js during TTS playback */
+
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg-void);
+  overflow: hidden;
+  font-family: var(--font-body);
+  color: var(--text-soft);
+}
+
+#app {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+#vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 38%, var(--bg-glow) 0%, transparent 60%),
+    radial-gradient(140% 100% at 50% 100%, rgba(6,6,11,0.95) 0%, transparent 55%),
+    var(--bg-deep);
+  z-index: 0;
+}
+
+/* ---------- status bar ---------- */
+
+#statusBar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 20px;
+}
+
+.mono { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; color: var(--text-dim); }
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 8px currentColor;
+}
+.status-connecting { background: #e8b84b; color: #e8b84b; animation: pulse 1.2s ease-in-out infinite; }
+.status-connected { background: #6fe3a3; color: #6fe3a3; }
+.status-error { background: #ff6b7a; color: #ff6b7a; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---------- stage ---------- */
+
+#stage {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+#live2dCanvas {
+  height: 100%;
+  max-width: 100%;
+}
+
+/* ---------- subtitles: the signature element ---------- */
+/* Glow intensity and letter-spacing breathe with --glow-level, which
+   audio-handler.js updates ~30x/sec from the live TTS waveform amplitude —
+   so the text visibly "speaks" in sync with Lucie's voice. */
+
+#subtitleArea {
+  position: relative;
+  z-index: 2;
+  min-height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 32px;
+  text-align: center;
+}
+
+#subtitleText {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(17px, 2.6vw, 26px);
+  color: #fff;
+  letter-spacing: calc(0.01em + (var(--glow-level) * 0.02em));
+  text-shadow:
+    0 0 calc(6px + (var(--glow-level) * 22px)) var(--violet-soft),
+    0 0 calc(14px + (var(--glow-level) * 40px)) rgba(185, 139, 255, calc(0.25 + var(--glow-level) * 0.45)),
+    0 0 2px rgba(255,255,255,0.6);
+  transition: letter-spacing 60ms linear;
+  max-width: 640px;
+}
+
+#subtitleText:empty::before {
+  content: '';
+}
+
+/* ---------- controls ---------- */
+
+#controls {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 0 34px;
+}
+
+.mic-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px solid rgba(185, 139, 255, 0.35);
+  background: rgba(20, 17, 38, 0.75);
+  color: var(--violet);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 18px rgba(185, 139, 255, 0.15);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.mic-btn:hover { transform: translateY(-1px); }
+
+.mic-btn.recording {
+  color: var(--pink);
+  border-color: rgba(255, 143, 208, 0.6);
+  box-shadow: 0 0 0 6px rgba(255, 143, 208, 0.12), 0 0 26px rgba(255, 143, 208, 0.35);
+  animation: mic-breathe 1.4s ease-in-out infinite;
+}
+
+.mic-btn.processing {
+  color: var(--text-dim);
+  border-color: rgba(255,255,255,0.15);
+  animation: mic-think 1s linear infinite;
+}
+
+.mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@keyframes mic-breathe {
+  0%, 100% { box-shadow: 0 0 0 6px rgba(255, 143, 208, 0.12), 0 0 26px rgba(255, 143, 208, 0.35); }
+  50% { box-shadow: 0 0 0 10px rgba(255, 143, 208, 0.18), 0 0 34px rgba(255, 143, 208, 0.5); }
+}
+
+@keyframes mic-think {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+#micHint { color: var(--text-dim); }
+
+@media (max-width: 480px) {
+  #subtitleArea { min-height: 76px; padding: 0 18px; }
+  .mic-btn { width: 58px; height: 58px; }
+}

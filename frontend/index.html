@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lucie</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <div id="app">
+    <div id="vignette"></div>
+
+    <header id="statusBar">
+      <span id="statusDot" class="status-dot status-connecting"></span>
+      <span id="statusText" class="mono">connecting…</span>
+    </header>
+
+    <main id="stage">
+      <canvas id="live2dCanvas"></canvas>
+    </main>
+
+    <div id="subtitleArea">
+      <p id="subtitleText"></p>
+    </div>
+
+    <footer id="controls">
+      <button id="micButton" class="mic-btn" aria-label="Hold to talk">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/>
+          <path d="M19 11a7 7 0 0 1-14 0"/>
+          <path d="M12 18v3"/>
+        </svg>
+      </button>
+      <span id="micHint" class="mono">hold to talk</span>
+    </footer>
+  </div>
+
+  <!-- Polyfill process object for pixi-live2d-display browser compatibility -->
+  <script>
+    window.process = window.process || { env: { NODE_ENV: 'production' } };
+  </script>
+
+  <!-- Live2D Cubism Core (extracted from the official Cubism Web SDK zip) -->
+  <script src="live2d/core/live2dcubismcore.min.js"></script>
+
+  <!-- PixiJS renderer + pixi-live2d-display (Cubism 4 build) -->
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.9/dist/browser/pixi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+
+
+
+
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
