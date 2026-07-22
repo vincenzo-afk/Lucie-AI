@@ -26,7 +26,14 @@ export async function initLive2D(canvasEl) {
   const { Live2DModel } = PIXI.live2d;
   const model = await Live2DModel.from(MODEL_PATH);
 
-  model.visible = false;
+  // Ensure model textures are fully loaded before adding to stage to prevent doDrawModel errors
+  if (!model.textures || model.textures.length === 0 || !model.textures[0]) {
+    await new Promise((resolve) => {
+      model.once('load', resolve);
+      setTimeout(resolve, 800);
+    });
+  }
+
   app.stage.addChild(model);
   fitModel(model, app);
   window.addEventListener('resize', () => fitModel(model, app));
@@ -38,11 +45,8 @@ export async function initLive2D(canvasEl) {
     model.internalModel.eyeBlink = null;
   }
 
-  requestAnimationFrame(() => {
-    model.visible = true;
-  });
-
   return { app, model };
+
 
 }
 
