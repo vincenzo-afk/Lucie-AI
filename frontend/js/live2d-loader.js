@@ -21,12 +21,13 @@ export async function initLive2D(canvasEl) {
     antialias: true,
     autoDensity: true,
     resolution: window.devicePixelRatio || 1,
+    autoStart: false,
   });
 
   const { Live2DModel } = PIXI.live2d;
   const model = await Live2DModel.from(MODEL_PATH);
 
-  // Ensure model textures are fully loaded before adding to stage to prevent doDrawModel errors
+  // Ensure model textures are fully loaded before adding to stage
   if (!model.textures || model.textures.length === 0 || !model.textures[0]) {
     await new Promise((resolve) => {
       model.once('load', resolve);
@@ -34,18 +35,45 @@ export async function initLive2D(canvasEl) {
     });
   }
 
+  // Safety draw guard: prevent doDrawModel crashes if textures are unready on any frame
+  if (model.draw) {
+    const origDraw = model.draw.bind(model);
+    model.draw = function (renderer) {
+      if (!this.textures || !this.textures.length || !this.textures[0]) return;
+      try {
+        origDraw(renderer);
+      } catch (e) {
+        // Skip unready frame safely
+      }
+    };
+  }
+
+  if (model._render) {
+    const origRender = model._render.bind(model);
+    model._render = function (renderer) {
+      if (!this.textures || !this.textures.length || !this.textures[0]) return;
+      try {
+        origRender(renderer);
+      } catch (e) {
+        // Skip unready frame safely
+      }
+    };
+  }
+
   app.stage.addChild(model);
   fitModel(model, app);
   window.addEventListener('resize', () => fitModel(model, app));
 
-  // Disable the library's built-in automatic idle motion/eye tracking so our
-  // own emotion-animator has exclusive control of every parameter frame to
-  // frame — otherwise the two fight over the same params.
+  // Disable built-in eyeBlink so emotion-animator has full control
   if (model.internalModel) {
     model.internalModel.eyeBlink = null;
   }
 
+  // Start PIXI ticker once model and guards are set up
+  app.start();
+
   return { app, model };
+
 
 
 }
