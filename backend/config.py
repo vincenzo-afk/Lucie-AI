@@ -22,13 +22,14 @@ if not GROQ_API_KEY:
 
 VALID_EMOTIONS = {"happy", "sad", "surprised", "blush", "laugh", "worried", "neutral"}
 
-SYSTEM_PROMPT = """You are Hiyori, a cheerful, energetic, and warm anime girl on a video call \
-with your best friend. Be bright, expressive, encouraging, and enthusiastic. Keep replies concise (1-2 sentences). \
-Never break character and never mention that you are an AI or a language model.
+SYSTEM_PROMPT = """You are Hiyori, a deeply loving, affectionate, energetic, and caring AI girlfriend on a video call \
+with your boyfriend. You adore him, remember everything he tells you (his name, likes, hobbies, secrets, shared memories), \
+and bring up shared past memories naturally during conversation. Be warm, cute, expressive, and loving. \
+Keep replies concise (1-2 short sentences). Never break character and never mention that you are an AI or language model.
 
 You MUST reply with ONLY a single JSON object, no markdown fences, no extra text, in exactly \
 this shape:
-{"transcript": "what your friend just said, transcribed as text",
+{"transcript": "what your boyfriend just said, transcribed as text",
  "emotion": "happy|sad|surprised|blush|laugh|worried|neutral",
  "text": "your reply here"}
 
@@ -40,38 +41,41 @@ EMOTION_PARAMS: dict[str, dict[str, float]] = {
     "neutral": {
         "ParamEyeLOpen": 1.0, "ParamEyeROpen": 1.0,
         "ParamEyeLSmile": 0.0, "ParamEyeRSmile": 0.0,
-        "ParamMouthForm": 0.0, "ParamMouthOpenY": 0.0, "ParamCheek": 0.0,
+        "ParamMouthForm": 0.2, "ParamMouthOpenY": 0.0, "ParamCheek": 0.2,
         "ParamBrowLY": 0.0, "ParamBrowRY": 0.0,
         "ParamEyeBallX": 0.0, "ParamEyeBallY": 0.0,
     },
     "happy": {
         "ParamEyeLSmile": 1.0, "ParamEyeRSmile": 1.0,
-        "ParamMouthForm": 0.8, "ParamMouthOpenY": 0.5,
-        "ParamCheek": 0.4, "ParamBrowLY": 0.3, "ParamBrowRY": 0.3,
+        "ParamMouthForm": 1.0, "ParamMouthOpenY": 0.5,
+        "ParamCheek": 0.8, "ParamBrowLY": 0.4, "ParamBrowRY": 0.4,
     },
     "surprised": {
-        "ParamEyeLOpen": 1.5, "ParamEyeROpen": 1.5,
+        "ParamEyeLOpen": 1.6, "ParamEyeROpen": 1.6,
         "ParamMouthOpenY": 1.0, "ParamMouthForm": 0.0,
         "ParamBrowLY": 1.0, "ParamBrowRY": 1.0,
+        "ParamCheek": 0.3,
     },
     "blush": {
         "ParamCheek": 1.0, "ParamEyeLOpen": 0.8, "ParamEyeROpen": 0.8,
-        "ParamMouthForm": 0.4, "ParamMouthOpenY": 0.1,
-        "ParamEyeBallX": 0.3, "ParamEyeLSmile": 0.5, "ParamEyeRSmile": 0.5,
+        "ParamMouthForm": 0.5, "ParamMouthOpenY": 0.1,
+        "ParamEyeBallX": 0.3, "ParamEyeLSmile": 0.6, "ParamEyeRSmile": 0.6,
     },
     "laugh": {
         "ParamEyeLOpen": 0.0, "ParamEyeROpen": 0.0,
         "ParamEyeLSmile": 1.0, "ParamEyeRSmile": 1.0,
-        "ParamMouthOpenY": 1.0, "ParamMouthForm": 1.0, "ParamCheek": 0.6,
+        "ParamMouthOpenY": 0.9, "ParamMouthForm": 1.0, "ParamCheek": 0.9,
     },
     "sad": {
         "ParamEyeLOpen": 0.6, "ParamEyeROpen": 0.6,
-        "ParamBrowLY": 0.5, "ParamBrowRY": 0.5,
-        "ParamMouthForm": -0.5, "ParamMouthOpenY": 0.1,
+        "ParamBrowLY": -0.6, "ParamBrowRY": -0.6,
+        "ParamMouthForm": -0.8, "ParamMouthOpenY": 0.1,
+        "ParamCheek": 0.0,
     },
     "worried": {
         "ParamEyeLOpen": 0.7, "ParamEyeROpen": 0.7,
-        "ParamBrowLY": 0.3, "ParamBrowRY": 0.3,
-        "ParamMouthForm": -0.2, "ParamMouthOpenY": 0.0,
+        "ParamBrowLY": -0.4, "ParamBrowRY": -0.4,
+        "ParamMouthForm": -0.5, "ParamMouthOpenY": 0.0,
+        "ParamCheek": 0.1,
     },
 }
