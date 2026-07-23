@@ -3,7 +3,7 @@
 //   - window.Live2DCubismCore  (from live2d/core/live2dcubismcore.min.js)
 //   - window.PIXI, window.PIXI.live2d.Live2DModel  (from the CDN bundles)
 
-const MODEL_PATH = 'model/Mashiro/seifuku.model.json';
+const MODEL_PATH = 'model/Mashiro/shifuku.model.json';
 
 export async function initLive2D(canvasEl) {
   if (!window.PIXI || !window.PIXI.live2d) {
