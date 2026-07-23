@@ -88,8 +88,20 @@ export function createEmotionAnimator(model) {
   }
 
   function setParamRaw(id, value) {
+    // Generate Cubism 2.1 uppercase format (e.g. ParamMouthOpenY -> PARAM_MOUTH_OPEN_Y)
+    const upperId = id.replace(/([A-Z])/g, '_$1').toUpperCase().replace(/^_/, '');
     try {
-      coreModel.setParameterValueById(id, value);
+      if (coreModel && typeof coreModel.setParameterValueById === 'function') {
+        coreModel.setParameterValueById(id, value);
+      }
+      if (coreModel && typeof coreModel.setParamFloat === 'function') {
+        coreModel.setParamFloat(id, value);
+        coreModel.setParamFloat(upperId, value);
+      }
+      if (model.internalModel && typeof model.internalModel.setParameterValue === 'function') {
+        model.internalModel.setParameterValue(id, value);
+        model.internalModel.setParameterValue(upperId, value);
+      }
     } catch {
       // Parameter not present on this model build; safe to ignore.
     }
