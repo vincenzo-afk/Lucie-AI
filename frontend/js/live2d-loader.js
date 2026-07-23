@@ -62,13 +62,12 @@ export async function initLive2D(canvasEl) {
 
 function fitModel(model, app) {
   if (!model || !app) return;
-  // In PIXI 8, app.canvas replaces app.view
   const rendererHeight = app.canvas.parentElement ? app.canvas.parentElement.clientHeight : window.innerHeight;
   const rendererWidth  = app.canvas.parentElement ? app.canvas.parentElement.clientWidth  : window.innerWidth;
 
   let modelHeight = 1000;
-  if (model.internalModel && model.internalModel.height) {
-    modelHeight = model.internalModel.height;
+  if (model.internalModel) {
+    modelHeight = model.internalModel.height || model.internalModel.originalHeight || 1000;
   }
 
   const scale = (rendererHeight * 0.88) / modelHeight;
@@ -76,8 +75,20 @@ function fitModel(model, app) {
 
   model.scale.set(scale);
   model.x = rendererWidth / 2;
-  model.y = rendererHeight * 0.05;
-  if (model.anchor && typeof model.anchor.set === 'function') {
-    model.anchor.set(0.5, 0);
+
+  // Cubism 2 models (Mashiro) have a centered (0,0) origin and different vertical bounds.
+  // Cubism 4/5 models (Miara/Lucie) have a top-left origin.
+  const isCubism2 = !model.internalModel || !model.internalModel.originalHeight;
+
+  if (isCubism2) {
+    model.y = rendererHeight * 0.5; // Center vertically for Cubism 2
+    if (model.anchor && typeof model.anchor.set === 'function') {
+      model.anchor.set(0, 0); // (0,0) is already center for Cubism 2
+    }
+  } else {
+    model.y = rendererHeight * 0.05;
+    if (model.anchor && typeof model.anchor.set === 'function') {
+      model.anchor.set(0.5, 0); // (0.5,0) centers top-left Cubism 4 models
+    }
   }
 }
