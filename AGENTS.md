@@ -13,9 +13,9 @@ Guidelines for any AI (or human) making further changes to this project.
    `Core/live2dcubismcore.min.js` from the SDK zip is used, at
    `frontend/live2d/core/`.
 4. **All real-time messages go over the `/ws/chat` WebSocket** — no HTTP polling.
-5. **Gemini chat calls MUST return the JSON contract** defined in
+5. **Groq LLM chat calls MUST return the JSON contract** defined in
    `backend/config.py::SYSTEM_PROMPT` — `{transcript, emotion, text}`. If you
-   change the schema, update `gemini_client._extract_json` to match.
+   change the schema, update `groq_client._extract_json` to match.
 6. **Audio between frontend and backend is always base64** inside the
    WebSocket JSON envelope (`audio_chunk` in, `audio` out).
 7. **ChromaDB runs in-memory (`EphemeralClient`)** — no persistence file for v1.
@@ -31,7 +31,7 @@ Guidelines for any AI (or human) making further changes to this project.
 ## Error handling
 
 - WebSocket disconnects: the frontend auto-reconnects with exponential backoff (`websocket.js`).
-- Gemini API errors: caught per-request in `main.py::handle_message`; the user
+- Groq API errors: caught per-request in `main.py::handle_message`; the user
   gets a friendly in-character fallback message rather than a stack trace.
 - TTS failures specifically degrade gracefully: the text + expression are
   already sent before TTS runs, so a TTS failure only means she goes silent

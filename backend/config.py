@@ -8,20 +8,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-2.0-flash")
-TTS_MODEL: str = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
-TTS_VOICE: str = os.getenv("TTS_VOICE", "Kore")
+GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+GROQ_STT_MODEL: str = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
 HOST: str = os.getenv("HOST", "0.0.0.0")
 PORT: int = int(os.getenv("PORT", "8000"))
 CORS_ORIGINS: list[str] = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",")]
 MAX_MESSAGES_PER_MINUTE: int = int(os.getenv("MAX_MESSAGES_PER_MINUTE", "10"))
 
-if not GEMINI_API_KEY:
-    # We don't raise here so the server can still boot and report a clean
-    # error over the WebSocket instead of crashing on import.
-    print("[config] WARNING: GEMINI_API_KEY is not set. Copy .env.example to .env and add your key.")
+if not GROQ_API_KEY:
+    print("[config] WARNING: GROQ_API_KEY is not set. Copy .env.example to .env and add your key.")
 
 VALID_EMOTIONS = {"happy", "sad", "surprised", "blush", "laugh", "worried", "neutral"}
 

@@ -15,7 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import audio_utils
 import config
 import emotion_engine
-import gemini_client
+import groq_client
+import tts_engine
 from memory import ConversationMemory
 
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +35,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "gemini_configured": bool(config.GEMINI_API_KEY)}
+    return {"status": "ok", "groq_configured": bool(config.GROQ_API_KEY)}
 
 
 class RateLimiter:
@@ -60,15 +61,22 @@ async def handle_message(websocket: WebSocket, message: dict, memory: Conversati
     if msg_type == "audio_chunk":
         audio_bytes = audio_utils.b64_to_bytes(message["data"])
         mime_type = message.get("mime_type", "audio/webm")
-        context = memory.build_context("")  # transcript not known yet, use recent turns only
-        reply = await gemini_client.get_reply_from_audio(audio_bytes, mime_type, context)
+        
+        # 1. Speech-to-Text via Groq Whisper API
+        user_text = await groq_client.transcribe_audio(audio_bytes, mime_type)
+        if not user_text:
+            user_text = "[Audio Input]"
+            
+        # 2. Chat / emotion via Groq LLaMA 3.3 70B
+        context = memory.build_context(user_text)
+        reply = await groq_client.get_reply_from_text(user_text, context)
 
     elif msg_type == "text_message":
         user_text = message.get("text", "").strip()
         if not user_text:
             return
         context = memory.build_context(user_text)
-        reply = await gemini_client.get_reply_from_text(user_text, context)
+        reply = await groq_client.get_reply_from_text(user_text, context)
 
     else:
         await websocket.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
@@ -88,13 +96,13 @@ async def handle_message(websocket: WebSocket, message: dict, memory: Conversati
     })
 
     try:
-        pcm_bytes = await gemini_client.synthesize_speech(reply["text"])
-        wav_bytes = audio_utils.wrap_pcm_as_wav(pcm_bytes)
-        await websocket.send_json({
-            "type": "audio",
-            "audio_base64": audio_utils.bytes_to_b64(wav_bytes),
-            "format": "wav",
-        })
+        audio_data = await tts_engine.synthesize_speech(reply["text"])
+        if audio_data:
+            await websocket.send_json({
+                "type": "audio",
+                "audio_base64": audio_utils.bytes_to_b64(audio_data),
+                "format": "audio/mp3",
+            })
     except Exception:
         logger.error("TTS synthesis failed:\n%s", traceback.format_exc())
         await websocket.send_json({
