@@ -6,7 +6,7 @@ import json
 import logging
 from groq import AsyncGroq
 
-import config
+from backend import config
 
 logger = logging.getLogger("lucie.groq")
 

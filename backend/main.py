@@ -2,7 +2,7 @@
 Lucie AI Companion - backend entrypoint.
 
 Run with:
-    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 """
 import logging
 import time
@@ -16,12 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-import audio_utils
-import config
-import emotion_engine
-import groq_client
-import tts_engine
-from memory import ConversationMemory
+from backend import audio_utils
+from backend import config
+from backend import emotion_engine
+from backend import groq_client
+from backend import tts_engine
+from backend.memory import ConversationMemory
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lucie.main")
@@ -166,4 +166,4 @@ async def ws_chat(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)
+    uvicorn.run("backend.main:app", host=config.HOST, port=config.PORT, reload=True)

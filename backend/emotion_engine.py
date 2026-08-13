@@ -4,7 +4,7 @@ Cubism parameter targets for the LucieSD3 model. Always starts from the
 neutral pose and overlays the emotion-specific deltas, so every response
 is a complete, well-formed parameter set (never partial).
 """
-import config
+from backend import config
 
 
 def get_live2d_params(emotion: str) -> dict[str, float]:
