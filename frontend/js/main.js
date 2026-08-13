@@ -1,8 +1,10 @@
-import { initLive2D } from './live2d-loader.js';
-import { createEmotionAnimator } from './emotion-animator.js';
-import { createChatSocket } from './websocket.js';
-import { createAudioHandler } from './audio-handler.js';
-import { createUiController } from './ui-controller.js';
+// Version tags force fresh loads even when the browser holds stale copies
+// of these modules from earlier deploys.
+import { initLive2D } from './live2d-loader.js?v=18';
+import { createEmotionAnimator } from './emotion-animator.js?v=18';
+import { createChatSocket } from './websocket.js?v=18';
+import { createAudioHandler } from './audio-handler.js?v=18';
+import { createUiController } from './ui-controller.js?v=18';
 
 async function main() {
   const ui = createUiController();
