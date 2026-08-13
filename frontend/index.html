@@ -38,6 +38,14 @@
   <!-- Polyfill process object for pixi-live2d-display browser compatibility -->
   <script>
     window.process = window.process || { env: { NODE_ENV: 'production' } };
+    // Diagnostics: surface any script parse/runtime error with its source URL.
+    window.addEventListener('error', (e) => {
+      const src = (e.filename || 'unknown').split('/').pop();
+      console.error('[diag] script error at', src, ':', e.message);
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      console.error('[diag] rejected promise:', String(e.reason));
+    });
   </script>
 
   <!-- Live2D Core SDKs (Cubism 2.1 + Cubism 4/5) -->
