@@ -18,7 +18,18 @@ def get_groq_client() -> AsyncGroq:
     if _groq_client is None:
         if not config.GROQ_API_KEY:
             raise RuntimeError("GROQ_API_KEY is not set in .env")
-        _groq_client = AsyncGroq(api_key=config.GROQ_API_KEY)
+        # Render (and some shells) set HTTP_PROXY/HTTPS_PROXY env vars that older
+        # httpx translates into a `proxies` kwarg, which the current httpx rejects.
+        # Force the client to connect directly.
+        import os
+        proxy_env = {
+            k: os.environ.pop(k, None)
+            for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+        }
+        try:
+            _groq_client = AsyncGroq(api_key=config.GROQ_API_KEY)
+        finally:
+            os.environ.update({k: v for k, v in proxy_env.items() if v is not None})
     return _groq_client
 
 
