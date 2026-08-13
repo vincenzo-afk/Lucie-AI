@@ -37,8 +37,11 @@ async def no_cache_static_assets(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith(("/js/", "/css/", "/live2d/")):
         response.headers["Cache-Control"] = "no-cache, no-store"
-        response.headers.pop("etag", None)
-        response.headers.pop("last-modified", None)
+        for stale in ("etag", "last-modified"):
+            try:
+                del response.headers[stale]
+            except KeyError:
+                pass
     return response
 
 # Serve the frontend (Live2D assets, JS, CSS) from the same service so a
