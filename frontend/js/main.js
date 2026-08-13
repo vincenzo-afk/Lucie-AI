@@ -85,8 +85,18 @@ async function main() {
   animator?.setLipSyncSource(audio.getLipSyncLevel);
 
   // --- WebSocket ---
+  let woke = false;
   const socket = createChatSocket({
+    onWaking: () => {
+      // Render free instances spin down when idle; the first load may need
+      // up to ~50s to wake up. Show an honest status instead of hanging.
+      if (!woke) {
+        ui.setStatus('connecting', 'waking her up…');
+        ui.setSubtitle('First visit after a while can take up to a minute — she\'s waking up!');
+      }
+    },
     onOpen: () => {
+      woke = true;
       ui.setStatus('connected', 'hands-free connected');
       ui.setSubtitle('Hands-Free AI Active — just start speaking!');
       startRecordingAudio();

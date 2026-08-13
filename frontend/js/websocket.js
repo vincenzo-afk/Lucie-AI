@@ -1,31 +1,70 @@
 // Manages the single WebSocket connection to the FastAPI backend.
-// Auto-reconnects with exponential backoff and exposes a small pub/sub API.
+// Handles Render free-tier cold starts (instance asleep -> ~50s wake-up) by
+// sending a lightweight HTTP wake-up request before each connection attempt,
+// and reconnects with capped exponential backoff forever.
 
 // Render hosts frontend + API on the same origin (wss://, no explicit port),
 // while local dev uses ws://hostname:8000. Overridable via window.WS_URL.
 const WS_URL = window.WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? ':8000' : ''}/ws/chat`;
-const MAX_BACKOFF_MS = 15000;
+const MAX_BACKOFF_MS = 8000;
 const PING_INTERVAL_MS = 20000;
+const WARMUP_INTERVAL_MS = 25000; // periodic HTTP ping keeps Render instance awake
 
 export function createChatSocket(handlers = {}) {
-  const { onOpen, onClose, onResponse, onAudio, onError } = handlers;
+  const { onOpen, onClose, onResponse, onAudio, onError, onWaking } = handlers;
 
   let socket = null;
   let backoff = 500;
   let pingTimer = null;
+  let warmupTimer = null;
   let manuallyClosed = false;
+  let wakeRequested = false;
+
+  // Fires a no-op GET request to wake the Render instance before connecting.
+  async function wakeServer() {
+    if (wakeRequested) return;
+    wakeRequested = true;
+    onWaking?.();
+    try {
+      // /health is served instantly once the instance is alive; the GET itself
+      // is what tells Render to boot the sleeping container.
+      await fetch('/health', { cache: 'no-store' });
+    } catch {
+      // ignore — the websocket connect attempt will still run
+    }
+  }
 
   function connect() {
     manuallyClosed = false;
-    socket = new WebSocket(WS_URL);
 
-    socket.addEventListener('open', () => {
+    // On Render (https origin), wake the instance before attempting the
+    // websocket handshake so we don't burn attempts during cold start.
+    if (location.protocol === 'https:') {
+      void wakeServer().then(() => { socket = newSocket(); });
+    } else {
+      socket = newSocket();
+    }
+  }
+
+  function newSocket() {
+    if (manuallyClosed) return null;
+    const s = new WebSocket(WS_URL);
+
+    s.addEventListener('open', () => {
       backoff = 500;
+      wakeRequested = false;
       pingTimer = setInterval(() => sendRaw({ type: 'ping' }), PING_INTERVAL_MS);
+      // Render free instances sleep after 15min of inactivity. A lightweight
+      // HTTP ping every 25s keeps the instance awake as long as this tab is
+      // open, so returning users never hit the cold-start wait again.
+      warmupTimer = setInterval(
+        () => void fetch('/health', { cache: 'no-store' }).catch(() => {}),
+        WARMUP_INTERVAL_MS,
+      );
       onOpen?.();
     });
 
-    socket.addEventListener('message', (event) => {
+    s.addEventListener('message', (event) => {
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -41,21 +80,25 @@ export function createChatSocket(handlers = {}) {
       }
     });
 
-    socket.addEventListener('close', () => {
+    s.addEventListener('close', () => {
       clearInterval(pingTimer);
+      clearInterval(warmupTimer);
       onClose?.();
       if (!manuallyClosed) scheduleReconnect();
     });
 
-    socket.addEventListener('error', () => {
-      onError?.('Connection error.');
-      socket.close();
+    s.addEventListener('error', () => {
+      s.close();
     });
+    return s;
   }
 
   function scheduleReconnect() {
+    // Reset the wake flag so the next attempt re-triggers a wake-up when the
+    // server appears to be asleep again.
+    wakeRequested = false;
     setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+    backoff = Math.min(backoff * 1.5, MAX_BACKOFF_MS);
   }
 
   function sendRaw(obj) {
@@ -77,6 +120,7 @@ export function createChatSocket(handlers = {}) {
   function close() {
     manuallyClosed = true;
     clearInterval(pingTimer);
+    clearInterval(warmupTimer);
     socket?.close();
   }
 
