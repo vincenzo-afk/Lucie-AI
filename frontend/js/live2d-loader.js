@@ -34,7 +34,7 @@ export async function initLive2D(canvasEl) {
   // Load the model
   let model;
   try {
-    model = await Live2DModel.from(MODEL_PATH, { autoInteract: false });
+    model = await Live2DModel.from(MODEL_PATH, { autoHitTest: false, autoFocus: false });
   } catch (err) {
     console.error('[live2d-loader] Model failed to load:', err);
     throw err;

@@ -31,8 +31,8 @@ export function createEmotionAnimator(model) {
       const file = def.File || def;
       if (typeof model.startMotion === 'function') {
         model.startMotion(file);
-      } else if (internalModel && internalModel.motionManager) {
-        internalModel.motionManager.startMotion(def, 0);
+      } else if (internalModel && typeof internalModel.startMotion === 'function') {
+        internalModel.startMotion(file, 0);
       }
     } catch (e) {
       // motion failed — keep it subtle; nothing to show
@@ -182,4 +182,6 @@ function randomBlinkDelay() {
 }
 
 function randomIdleDelay() {
-  return 4.0 + Math.random() * 6.0; // play a new Hiyori idle motion every 4-10s
+  // play a new Hiyori idle motion every 4-10s
+  return 4.0 + Math.random() * 6.0;
+}
