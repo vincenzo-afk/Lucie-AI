@@ -1,7 +1,9 @@
 // Manages the single WebSocket connection to the FastAPI backend.
 // Auto-reconnects with exponential backoff and exposes a small pub/sub API.
 
-const WS_URL = `ws://${location.hostname}:8000/ws/chat`;
+// Render hosts frontend + API on the same origin (wss://, no explicit port),
+// while local dev uses ws://hostname:8000. Overridable via window.WS_URL.
+const WS_URL = window.WS_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? ':8000' : ''}/ws/chat`;
 const MAX_BACKOFF_MS = 15000;
 const PING_INTERVAL_MS = 20000;
 

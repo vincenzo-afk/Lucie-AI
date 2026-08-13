@@ -3,6 +3,7 @@
 //   - window.Live2DCubismCore  (from live2d/core/live2dcubismcore.min.js)
 //   - window.PIXI, window.PIXI.live2d.Live2DModel  (from the CDN bundles)
 
+// Canonical Hiyori Pro (Cubism 4) runtime assets, served from frontend/model/Hiyori/
 const MODEL_PATH = 'model/Hiyori/hiyori_pro_t11.model3.json';
 
 export async function initLive2D(canvasEl) {
@@ -31,7 +32,13 @@ export async function initLive2D(canvasEl) {
   });
 
   // Load the model
-  const model = await Live2DModel.from(MODEL_PATH, { autoInteract: false });
+  let model;
+  try {
+    model = await Live2DModel.from(MODEL_PATH, { autoInteract: false });
+  } catch (err) {
+    console.error('[live2d-loader] Model failed to load:', err);
+    throw err;
+  }
 
   // Guard model.renderLive2D against initial frame texture loading race conditions
   if (typeof model.renderLive2D === 'function') {

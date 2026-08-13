@@ -9,8 +9,12 @@ import time
 import traceback
 from collections import deque
 
+from pathlib import Path
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import audio_utils
 import config
@@ -23,6 +27,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lucie.main")
 
 app = FastAPI(title="Lucie AI Companion")
+
+# Serve the frontend (Live2D assets, JS, CSS) from the same service so a
+# single Render instance hosts both the UI and the chat API.
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+app.mount("/model", StaticFiles(directory=FRONTEND_DIR / "model", check_dir=False), name="model_assets")
+app.mount("/live2d", StaticFiles(directory=FRONTEND_DIR / "live2d", check_dir=False), name="live2d_cores")
+app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css", check_dir=False), name="frontend_css")
+app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js", check_dir=False), name="frontend_js")
+
+
+@app.get("/")
+async def serve_index():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
 
 app.add_middleware(
     CORSMiddleware,

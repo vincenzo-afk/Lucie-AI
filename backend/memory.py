@@ -15,9 +15,16 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", 
 os.makedirs(DB_DIR, exist_ok=True)
 
 _client = chromadb.PersistentClient(path=DB_DIR)
-_embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
+
+# Prefer local SentenceTransformer embeddings when available; otherwise fall back
+# to ChromaDB's default ONNX mini model so Render deployments (without torch)
+# still get working semantic memory.
+try:
+    _embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="all-MiniLM-L6-v2"
+    )
+except Exception:
+    _embedder = embedding_functions.DefaultEmbeddingFunction()
 
 _SHORT_TERM_LIMIT = 10
 _SIMILAR_TOP_K = 6

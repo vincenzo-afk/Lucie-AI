@@ -19,7 +19,7 @@ async function main() {
     // PIXI 8 ticker.add receives a Ticker instance which has .deltaTime
     app.ticker.add((ticker) => animator.tick(ticker.deltaTime * (1000 / 60)));
   } catch (err) {
-    console.error(err);
+    console.error('[main] Live2D init failed:', err);
     ui.setSubtitle("Couldn't load Lucie's model — check the console for details.");
   }
 

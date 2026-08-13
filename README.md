@@ -1,109 +1,77 @@
-# Lucie AI Companion
+# Lucie — Live 2D AI Companion
 
-A real-time conversational AI avatar: talk to Lucie, a Live2D character, and
-she replies with voice, expressions, and lip sync — powered end-to-end by
-Gemini.
+A real-time, hands-free Live2D AI girlfriend that hears you, talks back with a real voice, and reacts with genuine emotion — all through one full-screen animated character.
 
-## Architecture
+## How it works
 
-```
-Browser (mic + Live2D canvas, PixiJS)
-        |  WebSocket (audio in / text+emotion+audio out)
-        v
-FastAPI backend  --->  Gemini API (chat + native TTS, audio understood directly)
-        |
-        v
-  ChromaDB (in-memory conversation memory)
-```
+1. **Live2D character** — The avatar is the official **Hiyori Pro (Cubism 4)** model from Live2D Inc. (the same quality tier as commercial VTuber apps). Her mouth, eyes, brows, blush, and body move live, driven by actual TTS audio waveform analysis — she literally *talks*.
+2. **Listening** — The browser records your voice continuously (WebM/Opus) and auto-detects when you stop speaking (voice activity detection).
+3. **Thinking** — The audio is transcribed by **Groq Whisper**, then **LLaMA 3.3 70B** on Groq replies in character with an emotion tag (`happy`, `sad`, `surprised`, `blush`, `laugh`, `worried`, `neutral`).
+4. **Talking** — **edge-tts** synthesizes a natural female neural voice. The frontend decodes it with Web Audio and streams amplitude into `ParamMouthOpenY` every frame for real lip-sync.
+5. **Remembering** — Every exchange is stored in a persistent **ChromaDB** vector memory, so she recalls your name, hobbies, and shared memories across sessions.
 
-Gemini is multimodal, so speech-to-text isn't a separate step: the backend
-sends your recorded audio straight to `gemini-2.0-flash`, which transcribes
-it internally and replies in character as JSON in one round trip. A second
-call to `gemini-2.5-flash-preview-tts` turns her reply into voice.
-
-## Quick start
-
-### 1. Install the backend
+## Running locally
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate   # optional but recommended
-pip install -r requirements.txt
-```
-
-### 2. Set your API key
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and paste in a key from https://aistudio.google.com/apikey.
-
-### 3. The Live2D SDK core is already in place
-
-`frontend/live2d/core/live2dcubismcore.min.js` is already extracted into this
-repo from the official Cubism Web SDK. The rest of the Cubism framework is
-handled in-browser by `pixi-live2d-display` (loaded from a CDN in
-`index.html`), so there's no build step for it.
-
-### 4. The model is already in place
-
-`model/LucieSD3/` already contains `LucieSD3.model3.json` and everything it
-references (`.moc3`, textures, physics, display info).
-
-### 5. Run it
-
-```bash
-# Terminal 1 — backend
-cd backend
+cp ../.env.example .env     # add GROQ_API_KEY
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# Terminal 2 — frontend (any static file server works)
-cd frontend
-python -m http.server 3000
 ```
 
-### 6. Open it
+Then open `http://localhost:8000` — the FastAPI app serves the frontend at `/` alongside the chat API at `/ws/chat`.
 
-Go to `http://localhost:3000`. Hold the mic button, say something, let go —
-Lucie transcribes it, replies in character, and speaks back with a matching
-expression.
+> Get a free Groq API key at https://console.groq.com/
+
+## Deploying to Render
+
+1. Connect this repository to a new **Web Service** on Render.
+2. Configure:
+   - **Build Command:** `./build.sh`
+   - **Start Command:** `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+   - **Environment variable:** `GROQ_API_KEY` — your Groq API key
+3. Deploy. One service hosts both the UI and the API; the frontend automatically uses `ws://localhost:8000` locally and `wss://<render-host>` in production.
+
+## Project layout
+
+```
+backend/                       FastAPI service: STT, LLM, emotion engine, TTS, memory
+frontend/                      index.html + Live2D renderer (PixiJS 8 + Cubism Core)
+frontend/model/Hiyori/         Hiyori Pro runtime assets (moc3, textures, motions)
+frontend/live2d/core/          Official Cubism 2.1 + Cubism 4/5 core SDKs
+data/chroma_db/                Persistent conversation memory
+```
 
 ## Features
 
-- 🎙️ Hold-to-talk voice chat, no separate STT step (Gemini reads the audio directly)
-- 😊 Emotion-driven Live2D expressions (happy, sad, surprised, blush, laugh, worried, neutral)
-- 👄 Live lip sync driven by the actual TTS waveform amplitude, not a guess
-- 🧠 Conversation memory: recent turns kept verbatim, older ones recalled by semantic similarity (ChromaDB)
-- ✨ Voice-reactive glowing subtitles — the glow intensity tracks her live voice amplitude
-- 🔁 Auto-reconnecting WebSocket with exponential backoff
-
-## Live2D parameters in use (from `model/LucieSD3/LucieSD3.cdi3.json`)
-
-| Parameter | Range | Used for |
-|---|---|---|
-| `ParamEyeLOpen` / `ParamEyeROpen` | 0 – 1.9 | Blinking, expressions |
-| `ParamEyeLSmile` / `ParamEyeRSmile` | 0 – 1 | Happy / laughing eyes |
-| `ParamMouthForm` | -1 – 1 | Smile / frown shape |
-| `ParamMouthOpenY` | 0 – 1 | Talking + lip sync |
-| `ParamCheek` | 0 – 1 | Blush |
-| `ParamBrowLY` / `ParamBrowRY` | -1 – 1 | Sad / surprised brows |
-| `ParamAngleX/Y/Z` | -30 – 30 | Idle head sway |
-| `ParamEyeBallX/Y` | -1 – 1 | Idle eye drift |
-| `ParamBreath` | 0 – 1 | Idle breathing |
-
-## Emotion → expression map
-
-See `backend/config.py::EMOTION_PARAMS` — it's the single source of truth
-the emotion engine reads from.
+- Microphone hands-free voice chat with automatic speech-end detection
+- Emotion-driven Live2D expressions (happy, sad, surprised, blush, laugh, worried, neutral)
+- Live lip sync driven by the actual TTS waveform amplitude, not a guess
+- Built-in Hiyori idle body motions between utterances, paused during speech
+- Autonomous blinking, breathing, and gentle head sway
+- Conversation memory: recent turns kept verbatim, older ones recalled by semantic similarity (ChromaDB)
+- Voice-reactive glowing subtitles — glow intensity tracks her live voice amplitude
+- Auto-reconnecting WebSocket with exponential backoff
 
 ## Tech stack
 
-- **Backend**: FastAPI, WebSockets, ChromaDB (ephemeral/in-memory), `google-genai`
-- **Frontend**: Vanilla JS (ES modules), PixiJS + pixi-live2d-display, Web Audio API
-- **AI**: Gemini 2.0 Flash (chat + implicit STT), Gemini 2.5 Flash TTS (native audio out)
+- **Backend**: FastAPI, WebSockets, ChromaDB (persistent), Groq (Whisper STT + LLaMA 3.3 70B), edge-tts
+- **Frontend**: Vanilla JS (ES modules), PixiJS 8 + untitled-pixi-live2d-engine, official Cubism Core SDKs, Web Audio API
 
-## Project structure
+## Live2D parameters in use (Hiyori Pro, from `frontend/model/Hiyori/hiyori_pro_t11.cdi3.json`)
 
-See `AGENTS.md` for coding guidelines and `CLAUDE.md` for full project context
-(useful if you re-upload this repo to Claude for further changes).
+| Parameter | Used for |
+|---|---|
+| `ParamEyeLOpen` / `ParamEyeROpen` | Blinking, expressions |
+| `ParamEyeLSmile` / `ParamEyeRSmile` | Happy / laughing eyes |
+| `ParamMouthForm` / `ParamMouthOpenY` | Smile / frown shape, talking + lip sync |
+| `ParamCheek` | Blush |
+| `ParamBrowLY` / `ParamBrowRY` | Sad / surprised brows |
+| `ParamAngleX/Y/Z`, `ParamBodyAngleX/Y/Z` | Idle head/body sway |
+| `ParamEyeBallX/Y` | Idle eye drift |
+| `ParamBreath` | Idle breathing |
+
+## Note on licensed assets
+
+The Hiyori Pro model is distributed by Live2D Inc. under its own terms.
+It is bundled here solely as part of this project; do not redistribute the
+runtime assets separately.

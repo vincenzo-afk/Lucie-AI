@@ -7,9 +7,9 @@ backend/.venv/
 __pycache__/
 *.pyc
 
-# Live2D third-party assets (licensed)
-model/
-frontend/model
+# Live2D third-party assets (licensed) — frontend/model/* ignored except the tracked Hiyori copy
+frontend/model/*
+!frontend/model/Hiyori/
 
 # OS / Editor files
 .DS_Store

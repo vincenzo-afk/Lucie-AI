@@ -15,6 +15,42 @@ export function createEmotionAnimator(model) {
   const internalModel = model.internalModel;
   const coreModel = internalModel?.coreModel;
 
+  // Built-in Hiyori Idle / Tap motions from the model manifest — plays
+  // autonomous body motion while Lucie is NOT speaking, then pauses so
+  // emotion/lip-sync parameter writes stay authoritative during speech.
+  let idleMotions = [];
+  let isSpeaking = false;
+  if (internalModel && internalModel.motionManager) {
+    idleMotions = (internalModel.motionManager.definitions && internalModel.motionManager.definitions.Idle) || [];
+  }
+
+  function startIdleMotion() {
+    if (idleMotions.length === 0) return;
+    const def = idleMotions[Math.floor(Math.random() * idleMotions.length)];
+    try {
+      const file = def.File || def;
+      if (typeof model.startMotion === 'function') {
+        model.startMotion(file);
+      } else if (internalModel && internalModel.motionManager) {
+        internalModel.motionManager.startMotion(def, 0);
+      }
+    } catch (e) {
+      // motion failed — keep it subtle; nothing to show
+    }
+  }
+
+  let idleTimer = randomIdleDelay();
+
+  function setSpeaking(speaking) {
+    if (isSpeaking === speaking) return;
+    isSpeaking = speaking;
+    // while speaking, the animator's deterministic lip-sync & emotion
+    // parameters take full precedence over any playing motion file
+    if (!speaking) {
+      idleTimer = 0.5; // resume idle motion shortly after speech ends
+    }
+  }
+
   let target = neutralTarget();
   let current = { ...target };
 
@@ -35,6 +71,16 @@ export function createEmotionAnimator(model) {
   function tick(deltaMS) {
     const dt = Math.min(deltaMS / 1000, 0.05); // cap frame time step
     elapsed += dt;
+
+    // Roll idle Hiyori body motion between utterances (skipped while speaking
+    // so mouth/eye parameter control stays fully deterministic).
+    if (!isSpeaking) {
+      idleTimer -= dt;
+      if (idleTimer <= 0) {
+        startIdleMotion();
+        idleTimer = randomIdleDelay();
+      }
+    }
 
     // 1. Ease every target parameter smoothly toward goal.
     const t = 1 - Math.exp(-LERP_SPEED * dt);
@@ -82,7 +128,9 @@ export function createEmotionAnimator(model) {
 
     // 6. Real-time audio lip-sync (overrides mouth openness during speech).
     const lipLevel = getLipSyncLevel();
-    if (lipLevel > 0.003) {
+    const speakingNow = lipLevel > 0.003;
+    setSpeaking(speakingNow);
+    if (speakingNow) {
       // Scale RMS level to full mouth open range (0.2 .. 1.0)
       const openAmount = Math.min(1.0, Math.pow(lipLevel * 7.0, 0.6));
       setParamRaw('ParamMouthOpenY', openAmount);
@@ -132,3 +180,6 @@ function triangleWave(phase) {
 function randomBlinkDelay() {
   return 2.5 + Math.random() * 3.5;
 }
+
+function randomIdleDelay() {
+  return 4.0 + Math.random() * 6.0; // play a new Hiyori idle motion every 4-10s
