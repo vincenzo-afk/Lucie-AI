@@ -28,6 +28,19 @@ logger = logging.getLogger("lucie.main")
 
 app = FastAPI(title="Lucie AI Companion")
 
+
+@app.middleware("http")
+async def no_cache_static_assets(request, call_next):
+    """Force browsers to revalidate every static frontend asset (JS/CSS) on
+    every request. This makes it impossible to serve a stale, truncated copy
+    from the local HTTP cache after an incomplete download or old deploy."""
+    response = await call_next(request)
+    if request.url.path.startswith(("/js/", "/css/", "/live2d/")):
+        response.headers["Cache-Control"] = "no-cache, no-store"
+        response.headers.pop("etag", None)
+        response.headers.pop("last-modified", None)
+    return response
+
 # Serve the frontend (Live2D assets, JS, CSS) from the same service so a
 # single Render instance hosts both the UI and the chat API.
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
