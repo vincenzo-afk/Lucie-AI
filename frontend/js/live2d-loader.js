@@ -64,6 +64,32 @@ export async function initLive2D(canvasEl) {
     model.internalModel.eyeBlink = null;
   }
 
+  // Tap on Hiyori's body makes her react with a random gesture motion.
+  // Hit area 'HitArea/Body' is defined in the model manifest.
+  if (typeof model.hitTest === 'function') {
+    const canvas = app.canvas;
+    const onCanvasClick = async (ev) => {
+      // Convert CSS coordinates to canvas model space
+      const rect = canvas.getBoundingClientRect();
+      const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
+      // model.hitTest(x, y) expects canvas pixel coords and returns an array of
+      // hit area names (e.g. ['Body']); empty array means no hit.
+      let hit = false;
+      try {
+        const hits = model.hitTest(x, y);
+        hit = Array.isArray(hits) && hits.length > 0;
+      } catch {
+        // hit test not available
+      }
+      if (hit) {
+        window.dispatchEvent(new CustomEvent('lucie-tapped', { detail: { x, y } }));
+      }
+    };
+    canvas.addEventListener('pointerdown', onCanvasClick);
+    canvas._lucieTapHandler = onCanvasClick;
+  }
+
   return { app, model };
 }
 

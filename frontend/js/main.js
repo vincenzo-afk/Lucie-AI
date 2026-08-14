@@ -1,10 +1,10 @@
 // Version tags force fresh loads even when the browser holds stale copies
 // of these modules from earlier deploys.
-import { initLive2D } from './live2d-loader.js?v=18';
-import { createEmotionAnimator } from './emotion-animator.js?v=18';
-import { createChatSocket } from './websocket.js?v=18';
-import { createAudioHandler } from './audio-handler.js?v=18';
-import { createUiController } from './ui-controller.js?v=18';
+import { initLive2D } from './live2d-loader.js?v=19';
+import { createEmotionAnimator } from './emotion-animator.js?v=19';
+import { createChatSocket } from './websocket.js?v=19';
+import { createAudioHandler } from './audio-handler.js?v=19';
+import { createUiController } from './ui-controller.js?v=19';
 
 async function main() {
   const ui = createUiController();
@@ -20,6 +20,9 @@ async function main() {
     animator = createEmotionAnimator(model);
     // PIXI 8 ticker.add receives a Ticker instance which has .deltaTime
     app.ticker.add((ticker) => animator.tick(ticker.deltaTime * (1000 / 60)));
+
+    // Clicking/tapping Hiyori makes her react with a random gesture motion.
+    window.addEventListener('lucie-tapped', () => animator.playGesture('tap'));
   } catch (err) {
     console.error('[main] Live2D init failed:', err);
     ui.setSubtitle("Couldn't load Lucie's model — check the console for details.");
@@ -118,7 +121,9 @@ async function main() {
     },
     onResponse: (msg) => {
       ui.setSubtitle(msg.text);
-      animator?.setEmotionTarget(msg.live2d_params);
+      // Attach the backend emotion name so the animator picks a matching gesture.
+      const params = { ...(msg.live2d_params || {}), emotion: msg.emotion || '' };
+      animator?.setEmotionTarget(params);
     },
     onAudio: (msg) => {
       isProcessing = false;

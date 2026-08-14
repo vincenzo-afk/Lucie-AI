@@ -1,7 +1,14 @@
-// Drives Live2D model parameters every frame:
-//   - smoothly eases toward target emotion (eye smile, blush cheeks, mouth form, brows)
-//   - overlays gentle autonomous breathing & subtle head sway (prevents shaking)
-//   - applies live audio-driven lip sync during speech via beforeModelUpdate
+// Drives Live2D model parameters every frame AND manages rich animation:
+//   - cycles through Hiyori's 3 Idle motions so she is never static
+//   - plays expressive one-shot gesture motions (Flick, FlickDown, FlickUp,
+//     Tap, Tap@Body, Flick@Body) on emotion changes and body taps
+//   - smoothly eases toward target emotion (eye smile, blush, mouth, brows)
+//   - overlays gentle autonomous breathing & subtle head sway
+//   - applies live audio-driven lip sync during speech
+//
+// Engine API (untitled-pixi-live2d-engine):
+//   motionManager.startMotion(group, index, priority, options)
+//   MotionPriority: NONE=0, IDLE=1, NORMAL=2, FORCE=3
 
 const LERP_SPEED = 8; // snappier transition to new emotion
 
@@ -11,46 +18,131 @@ const IDLE_PARAM_IDS = [
   'ParamEyeBallX', 'ParamEyeBallY'
 ];
 
+const PRIO_IDLE = 1;    // background breathing/swaying motions
+const PRIO_TALK = 2;    // talking motion while speaking
+const PRIO_GESTURE = 3; // strong one-shot gestures
+
 export function createEmotionAnimator(model) {
   const internalModel = model.internalModel;
   const coreModel = internalModel?.coreModel;
 
-  // Built-in Hiyori Idle / Tap motions from the model manifest — plays
-  // autonomous body motion while Lucie is NOT speaking, then pauses so
-  // emotion/lip-sync parameter writes stay authoritative during speech.
-  let idleMotions = [];
-  let isSpeaking = false;
+  // Hiyori Pro manifest groups (definitions): Idle(3), Flick, FlickDown,
+  // FlickUp, Tap(2), Tap@Body, Flick@Body
+  let definitions = {};
   if (internalModel && internalModel.motionManager) {
-    idleMotions = (internalModel.motionManager.definitions && internalModel.motionManager.definitions.Idle) || [];
+    definitions = internalModel.motionManager.definitions || {};
   }
+  const groupNames = Object.keys(definitions);
 
-  function startIdleMotion() {
-    if (idleMotions.length === 0) return;
-    const def = idleMotions[Math.floor(Math.random() * idleMotions.length)];
+  // Track what's currently playing to avoid spamming the same motion
+  let lastGroup = null, lastIndex = -1;
+
+  // The engine exposes startMotion on the internal MotionManager.
+  const motionManager = internalModel?.motionManager;
+
+  function startMotion(groupName, index, priority, opts = {}) {
     try {
-      const file = def.File || def;
+      if (motionManager && typeof motionManager.startMotion === 'function') {
+        return motionManager.startMotion(groupName, index, priority, opts);
+      }
       if (typeof model.startMotion === 'function') {
-        model.startMotion(file);
-      } else if (internalModel && typeof internalModel.startMotion === 'function') {
-        internalModel.startMotion(file, 0);
+        return model.startMotion(groupName, index, priority, opts);
       }
     } catch (e) {
       // motion failed — keep it subtle; nothing to show
     }
+    return false;
   }
 
+  function list(groupName) {
+    return definitions[groupName] || [];
+  }
+
+  // Pick an index different from the last played one (within the group).
+  function pickDifferent(groupName) {
+    const n = list(groupName).length;
+    if (n === 0) return -1;
+    if (n === 1) return 0;
+    let idx = Math.floor(Math.random() * n);
+    if (lastGroup === groupName && idx === lastIndex) {
+      idx = (idx + 1 + Math.floor(Math.random() * (n - 1))) % n;
+    }
+    return idx;
+  }
+
+  // 1. IDLE: cycle through all 3 Idle motions (m01/m02/m05) with short gaps.
   let idleTimer = randomIdleDelay();
+
+  function startIdleMotion() {
+    const idx = pickDifferent('Idle');
+    if (idx < 0) return;
+    if (startMotion('Idle', idx, PRIO_IDLE, { loop: false, sound: false })) {
+      lastGroup = 'Idle';
+      lastIndex = idx;
+    }
+  }
+
+  // 2. TALKING: a livelier motion while she speaks (m05 bounce if available,
+  //    otherwise a random idle motion) so her body matches her voice.
+  function startTalkMotion() {
+    const idle = list('Idle');
+    if (idle.length === 0) return;
+    // m05 is the bounciest of the Idle set — prefer it while talking,
+    // but never repeat the motion that is already playing
+    let idx = -1;
+    for (let i = 0; i < idle.length; i++) {
+      const file = idle[i].File || idle[i];
+      if (file.includes('m05')) { idx = i; break; }
+    }
+    if (idx < 0 || (lastGroup === 'Idle' && idx === lastIndex)) {
+      idx = pickDifferent('Idle');
+    }
+    if (idx < 0) return;
+    if (startMotion('Idle', idx, PRIO_TALK, { loop: false, sound: false })) {
+      lastGroup = 'Idle';
+      lastIndex = idx;
+    }
+  }
+
+  // 3. GESTURES: one-shot expressive motions. Cycle through the non-idle
+  //    groups so consecutive gestures never repeat:
+  //    Flick / FlickDown / FlickUp / Tap / Tap@Body / Flick@Body
+  const GESTURE_GROUPS = groupNames.filter(g => g !== 'Idle');
+  let lastGestureGroup = null;
+
+  function playGesture(emotion) {
+    if (GESTURE_GROUPS.length === 0) return;
+    // Pick a different gesture group than last time for constant variety.
+    let group = GESTURE_GROUPS[Math.floor(Math.random() * GESTURE_GROUPS.length)];
+    if (GESTURE_GROUPS.length > 1 && group === lastGestureGroup) {
+      group = GESTURE_GROUPS[(GESTURE_GROUPS.indexOf(group) + 1) % GESTURE_GROUPS.length];
+    }
+    const idx = pickDifferent(group);
+    if (idx < 0) return;
+    if (startMotion(group, idx, PRIO_GESTURE, { loop: false, sound: false })) {
+      lastGroup = group;
+      lastIndex = idx;
+      lastGestureGroup = group;
+      gestureTimer = 2.2;
+      idleTimer = 3.2; // don't race the gesture with an idle motion
+    }
+  }
+
+  let isSpeaking = false;
+  let gestureTimer = 0; // cooldown while a gesture motion plays
 
   function setSpeaking(speaking) {
     if (isSpeaking === speaking) return;
     isSpeaking = speaking;
-    // while speaking, the animator's deterministic lip-sync & emotion
-    // parameters take full precedence over any playing motion file
-    if (!speaking) {
-      idleTimer = 0.5; // resume idle motion shortly after speech ends
+    if (speaking) {
+      startTalkMotion();
+      idleTimer = randomIdleDelay();
+    } else {
+      idleTimer = 0.6; // resume idle motion shortly after speech ends
     }
   }
 
+  // --- Emotion overlay ---
   let target = neutralTarget();
   let current = { ...target };
 
@@ -62,6 +154,17 @@ export function createEmotionAnimator(model) {
 
   function setEmotionTarget(params) {
     target = { ...neutralTarget(), ...params };
+    // Play a matching gesture motion when her emotion changes.
+    const emotion = target.emotion || emotionFromParams(target);
+    playGesture(emotion);
+  }
+
+  function emotionFromParams(p) {
+    if (p.ParamCheek >= 0.8) return 'blush';
+    if (p.ParamEyeLSmile >= 0.5) return 'happy';
+    if (p.ParamBrowLY <= -0.5) return 'angry';
+    if (p.ParamEyeLOpen <= 0.4) return 'sad';
+    return 'normal';
   }
 
   function setLipSyncSource(fn) {
@@ -71,10 +174,11 @@ export function createEmotionAnimator(model) {
   function tick(deltaMS) {
     const dt = Math.min(deltaMS / 1000, 0.05); // cap frame time step
     elapsed += dt;
+    if (gestureTimer > 0) gestureTimer -= dt;
 
-    // Roll idle Hiyori body motion between utterances (skipped while speaking
-    // so mouth/eye parameter control stays fully deterministic).
-    if (!isSpeaking) {
+    // Roll idle motion between utterances (skipped while speaking OR while a
+    // one-shot gesture is playing, so motion files never fight the gestures).
+    if (!isSpeaking && gestureTimer <= 0) {
       idleTimer -= dt;
       if (idleTimer <= 0) {
         startIdleMotion();
@@ -85,6 +189,7 @@ export function createEmotionAnimator(model) {
     // 1. Ease every target parameter smoothly toward goal.
     const t = 1 - Math.exp(-LERP_SPEED * dt);
     for (const id of Object.keys(target)) {
+      if (id === 'emotion') continue;
       current[id] = lerp(current[id] ?? target[id], target[id], t);
     }
 
@@ -92,7 +197,7 @@ export function createEmotionAnimator(model) {
     const breath = (Math.sin(elapsed * 1.2) + 1) / 2;
     setParamRaw('ParamBreath', breath);
 
-    // 3. Smooth gentle head sway & eyeball drift (overrides shaking body motion).
+    // 3. Smooth gentle head sway & eyeball drift (prevents shaking).
     setParamRaw('ParamAngleX', (current['ParamAngleX'] ?? 0) + Math.sin(elapsed * 0.4) * 2.5);
     setParamRaw('ParamAngleY', (current['ParamAngleY'] ?? 0) + Math.sin(elapsed * 0.3 + 1.0) * 2.0);
     setParamRaw('ParamAngleZ', (current['ParamAngleZ'] ?? 0) + Math.sin(elapsed * 0.25 + 0.5) * 1.2);
@@ -159,7 +264,7 @@ export function createEmotionAnimator(model) {
     });
   }
 
-  return { setEmotionTarget, setLipSyncSource, tick };
+  return { setEmotionTarget, setLipSyncSource, tick, playGesture };
 }
 
 function neutralTarget() {
@@ -182,6 +287,6 @@ function randomBlinkDelay() {
 }
 
 function randomIdleDelay() {
-  // play a new Hiyori idle motion every 4-10s
-  return 4.0 + Math.random() * 6.0;
+  // play a new Hiyori idle motion every 3-7s for constant variety
+  return 3.0 + Math.random() * 4.0;
 }
