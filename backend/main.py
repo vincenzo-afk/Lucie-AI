@@ -119,13 +119,20 @@ async def handle_message(websocket: WebSocket, message: dict, memory: Conversati
     memory.add_turn(reply.get("transcript", ""), reply["text"])
     params = emotion_engine.get_live2d_params(reply["emotion"])
 
-    # Send the text + expression immediately so the avatar reacts without
-    # waiting on TTS synthesis to finish.
+    # Resolve the gesture: prefer the LLM's explicit pick; otherwise use the
+    # emotion-driven default so the avatar never stays physically still.
+    gesture = reply.get("gesture", "") or config.EMOTION_DEFAULT_GESTURE.get(reply["emotion"], "none")
+    if gesture not in config.VALID_GESTURES:
+        gesture = "none"
+
+    # Send the text + expression + gesture immediately so the avatar reacts
+    # without waiting on TTS synthesis to finish.
     await websocket.send_json({
         "type": "response",
         "transcript": reply.get("transcript", ""),
         "text": reply["text"],
         "emotion": reply["emotion"],
+        "gesture": gesture,
         "live2d_params": params,
     })
 

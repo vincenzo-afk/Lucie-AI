@@ -110,6 +110,36 @@ export function createEmotionAnimator(model) {
   const GESTURE_GROUPS = groupNames.filter(g => g !== 'Idle');
   let lastGestureGroup = null;
 
+  // Map the LLM's explicit gesture vocabulary onto Hiyori's motion groups.
+  // When a specific group isn't available, fall back to a random gesture.
+  const GESTURE_GROUP_MAP = {
+    touch_hair: ['Flick'],
+    play_hair: ['FlickUp'],
+    head_shake: ['FlickDown'],
+    head_nod: ['Tap'],
+    wave: ['Flick', 'FlickUp'],
+    giggle: ['Tap'],
+    point: ['Flick@Body'],
+    blush: ['Tap'],
+  };
+
+  function playNamedGesture(name) {
+    const candidates = GESTURE_GROUP_MAP[name] || [];
+    for (const group of candidates) {
+      if (!groupNames.includes(group)) continue;
+      const idx = pickDifferent(group);
+      if (idx >= 0 && startMotion(group, idx, PRIO_GESTURE, { loop: false, sound: false })) {
+        lastGroup = group;
+        lastIndex = idx;
+        lastGestureGroup = group;
+        gestureTimer = 2.2;
+        idleTimer = 3.2;
+        return true;
+      }
+    }
+    return false;
+  }
+
   function playGesture(emotion) {
     if (GESTURE_GROUPS.length === 0) return;
     // Pick a different gesture group than last time for constant variety.
@@ -154,9 +184,16 @@ export function createEmotionAnimator(model) {
 
   function setEmotionTarget(params) {
     target = { ...neutralTarget(), ...params };
-    // Play a matching gesture motion when her emotion changes.
+    // Play a matching gesture motion when her emotion changes. The LLM can
+    // now pick a specific gesture (touch_hair, wave, ...); when it does, play
+    // that exact motion first. Otherwise keep the emotion-based fallback.
+    const explicitGesture = target.gesture || '';
     const emotion = target.emotion || emotionFromParams(target);
-    playGesture(emotion);
+    if (explicitGesture && explicitGesture !== 'none' && !playNamedGesture(explicitGesture)) {
+      playGesture(emotion);
+    } else if (!explicitGesture || explicitGesture === 'none') {
+      playGesture(emotion);
+    }
   }
 
   function emotionFromParams(p) {

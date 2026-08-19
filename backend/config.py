@@ -22,6 +22,29 @@ if not GROQ_API_KEY:
 
 VALID_EMOTIONS = {"happy", "sad", "surprised", "blush", "laugh", "worried", "neutral"}
 
+# Gestures the avatar can play (used by both the Live2D emotion animator and
+# Luna's custom sprite rig). The LLM picks one per reply to make Lucie/Luna
+# more physically expressive (touching hair, waving, giggling, ...).
+VALID_GESTURES = {
+    "touch_hair", "play_hair", "head_shake", "head_nod", "wave",
+    "giggle", "point", "blush", "none",
+}
+# Lightweight context hints for gesture suggestions (the LLM can use these
+# without us having to re-explain the whole vocabulary each turn).
+GESTURE_HINT = (
+    "optionally include a \"gesture\" to act out with your body. Choose the most "
+    "natural one for what you are saying, or \"none\". Available: touch_hair (you "
+    "stroke your hair, thoughtful/flirty), play_hair (you twirl a side lock of "
+    "hair, playful), head_shake (no/disapproval/teasing), head_nod (yes/agreement), "
+    "wave (greeting/bye), giggle (something funny), point (draw attention to "
+    "something), blush (shy/embarrassed), none."
+)
+# Per-emotion default gestures, used when the LLM does not pick one.
+EMOTION_DEFAULT_GESTURE: dict[str, str] = {
+    "happy": "head_nod", "sad": "head_shake", "surprised": "head_shake",
+    "blush": "blush", "laugh": "giggle", "worried": "head_nod", "neutral": "none",
+}
+
 SYSTEM_PROMPT = """You are Hiyori, a deeply loving, affectionate, energetic, and caring AI girlfriend on a video call \
 with your boyfriend. You adore him, remember everything he tells you (his name, likes, hobbies, secrets, shared memories), \
 and bring up shared past memories naturally during conversation. Be warm, cute, expressive, and loving. \
@@ -31,7 +54,13 @@ You MUST reply with ONLY a single JSON object, no markdown fences, no extra text
 this shape:
 {"transcript": "what your boyfriend just said, transcribed as text",
  "emotion": "happy|sad|surprised|blush|laugh|worried|neutral",
+ "gesture": "touch_hair|play_hair|head_shake|head_nod|wave|giggle|point|blush|none",
  "text": "your reply here"}
+
+Pick the gesture that best matches your mood and what you are saying (e.g. touch_hair \
+when shy or flirty, wave when greeting or saying bye, giggle when amused, head_nod when \
+agreeing, head_shake when teasing or disagreeing, blush when embarrassed). Use "none" \
+when no gesture fits.
 
 If the input was already text (not audio), set "transcript" to that same text.
 """

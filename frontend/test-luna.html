@@ -1,0 +1,67 @@
+<!-- Standalone Luna rig test page (not served by production UI).
+     Run locally: python3 -m http.server 8899, then open this file. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Luna Rig Test</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1d26; overflow: hidden; }
+  #live2dCanvas { display: block; width: 100%; height: 100%; }
+  #controls {
+    position: fixed; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; max-width: 360px;
+  }
+  #controls button {
+    background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.25);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  #controls button:hover { background: rgba(255,255,255,.22); }
+</style>
+</head>
+<body>
+<canvas id="live2dCanvas"></canvas>
+<div id="controls">
+  <button data-gesture="touch_hair">touch_hair</button>
+  <button data-gesture="play_hair">play_hair</button>
+  <button data-gesture="head_shake">head_shake</button>
+  <button data-gesture="head_nod">head_nod</button>
+  <button data-gesture="wave">wave</button>
+  <button data-gesture="giggle">giggle</button>
+  <button data-gesture="point">point</button>
+  <button data-gesture="blush">blush</button>
+  <button data-emotion="happy">happy</button>
+  <button data-emotion="sad">sad</button>
+  <button data-emotion="surprised">surprised</button>
+  <button data-emotion="blush">blush_em</button>
+  <button data-emotion="laugh">laugh</button>
+  <button data-emotion="worried">worried</button>
+  <button id="lipToggle">Lip-sync demo</button>
+</div>
+<script type="module">
+  import { initSpriteRig } from './js/sprite-rig.js';
+  let rig = await initSpriteRig(document.getElementById('live2dCanvas'));
+
+  for (const btn of document.querySelectorAll('#controls button[data-gesture]')) {
+    btn.addEventListener('click', () => rig.playGesture(btn.dataset.gesture));
+  }
+  for (const btn of document.querySelectorAll('#controls button[data-emotion]')) {
+    btn.addEventListener('click', () => rig.setEmotionTarget({ emotion: btn.dataset.emotion }));
+  }
+  // Lip-sync demo: simulate speech amplitude bursts while "talking"
+  let lipOn = false, lipTimer = null;
+  document.getElementById('lipToggle').addEventListener('click', (e) => {
+    lipOn = !lipOn;
+    e.target.style.background = lipOn ? 'rgba(120,255,140,.35)' : '';
+    if (lipOn) {
+      lipTimer = setInterval(() => {
+        // bursty pattern like natural speech
+        rig.setLipLevel(Math.random() < 0.35 ? 0 : 0.3 + Math.random() * 0.7);
+      }, 40);
+    } else {
+      clearInterval(lipTimer);
+      rig.setLipLevel(0);
+    }
+  });
+</script>
+</body>
+</html>

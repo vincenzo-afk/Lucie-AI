@@ -62,9 +62,16 @@ def _extract_json(raw_text: str) -> dict:
     if emotion not in config.VALID_EMOTIONS:
         emotion = "neutral"
 
+    # Gesture field: validate against the vocabulary, fall back to the
+    # per-emotion default (set by the caller if missing here).
+    gesture = data.get("gesture", "")
+    if not isinstance(gesture, str) or gesture not in config.VALID_GESTURES:
+        gesture = ""
+
     text = data.get("text", "").strip() or cleaned
     return {
         "emotion": emotion,
+        "gesture": gesture,
         "text": text,
         "transcript": data.get("transcript", "").strip(),
     }
@@ -120,6 +127,7 @@ async def get_reply_from_text(user_text: str, memory_context: str) -> dict:
         logger.error("Groq LLM error: %s", e)
         return {
             "emotion": "happy",
+            "gesture": "wave",
             "text": f"I heard you say '{user_text}'! I'm right here with you!",
             "transcript": user_text,
         }
