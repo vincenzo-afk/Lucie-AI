@@ -1,54 +1,46 @@
-// sprite-rig.js — Luna, a custom rigged 2D anime girl.
+// sprite-rig.js — Luna, a custom rigged 2D anime girl (v2, seamless layers).
 //
-// A lightweight layered-sprite rig (no Live2D required): each art layer is a
-// node in a bone tree. Every node holds pivot + scale/rotation/offset
-// transforms that are composed and rendered to a plain 2D canvas every frame.
+// All layers are native-size crops cut from ONE unified artwork
+// (unified_base.png 1632x2176). Each layer keeps its exact source origin, so
+// placing every crop at its origin makes the character one seamless piece.
+//
+// Transform model (origin-based, no padding):
+//   - Node stores origin=[ox,oy] in unified-image px and size=[w,h] (crop px)
+//   - viewScale (vs) maps unified px -> screen px (fits canvas)
+//   - Anchor screen pos: ax = origin[0]*vs (+ world offset), ay = origin[1]*vs
+//   - drawImage(img, ax - cx*s, ay - cy*s, w*s, h*s) with s = scale*vs
+//     (rotation pivots at the anchor; (cx,cy) is the pivot in layer-local px)
 //
 // Capabilities:
 //   - idle: breathing, hair sway, subtle head drift, periodic blink
 //   - gestures: touch_hair, play_hair, head_shake, head_nod, wave, giggle,
-//               point, blush (all driven by timeline tweens on the bones)
+//               point, blush (timeline tweens on the bones)
 //   - emotion blending: happy / sad / surprised / blush / laugh / worried /
 //               neutral (overlays on top of the idle pose)
 //   - lip sync: an external amplitude getter (Web Audio analyser) drives a
 //               canvas-drawn mouth patch over the smile line
 
-const ASSETS = {
-  back_hair: 'model/luna/back_hair.png',
-  body: 'model/luna/body.png',
-  head: 'model/luna/head.png',
-  arm_l: 'model/luna/arm_l.png',
-  arm_r: 'model/luna/arm_r.png',
-  blush: 'model/luna/blush.png',
-};
+const MANIFEST_SRC = 'model/luna/manifest.json';
 
-// --- model-space coordinates (all layers are 1024-wide source art) ----------
 // Draw order: back_hair -> body -> arm_l -> arm_r -> head -> blush -> mouth
-// Anchors are the world-space pivot point (px, py) each node rotates/scales
-// around. (cx, cy) is the pivot inside the layer's own 1024x1024(ish) space.
-const LAYOUT = {
-  back_hair: { anchor: [400, 170], cx: 512, cy: 55, z: 0 },
-  body: { anchor: [400, 580], cx: 512, cy: 55, z: 1 },
-  arm_l: { anchor: [260, 575], cx: 390, cy: 45, z: 2 },
-  arm_r: { anchor: [540, 575], cx: 380, cy: 45, z: 2 },
-  head: { anchor: [400, 565], cx: 512, cy: 955, z: 3 },
-  blush: { anchor: [400, 450], cx: 384, cy: 502, z: 4 },
+// Pivot (cx, cy) in each layer's own pixel space:
+//   body       (748, 1053) — torso center (breathing pivot)
+//   arm_l      (326,   0)  — shoulder top (arm hangs down; raising rotates)
+//   arm_r      (339,   0)  — shoulder top
+//   head       (522,   0)  — top center of the head crop (nod/tilt pivot)
+//   back_hair  (408,   0)  — top of the back-hair strip (sway pivot)
+const PIVOTS = {
+  back_hair: [408, 0],
+  body: [748, 1053],
+  arm_l: [26, 0],
+  arm_r: [197, 0],
+  head: [522, 0],
+  blush: [420, 80],
 };
 
-// Mouth patch sits ON the head layer at local coords — the smile
-// center in head.png local px (measured on the rendered canvas with
-// a gridded full capture: smile arc center canvas ~ (622,305),
-// head pivot screen (643,620), vs≈1.078)
-const MOUTH_LOCAL = [548, 617];
-
-const IMG_SCALES = {
-  back_hair: 0.80,
-  body: 0.80,
-  arm_l: 0.76,
-  arm_r: 0.76,
-  head: 0.80,
-  blush: 0.50,
-};
+// Mouth patch: head-layer-local px of the smile center.
+// Unified-image smile ≈ (850, 785); head origin = (293, 69) → (557, 716).
+const MOUTH_LOCAL = [516, 743];
 
 const EASE = {
   inOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
@@ -60,49 +52,62 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 class Node {
-  constructor(name, img, layout) {
+  constructor(name, img, manifest, pivot) {
+    const m = manifest[name];
     this.name = name;
     this.img = img;
-    this.anchor = layout.anchor; // world pivot in model space
-    this.cx = layout.cx;
-    this.cy = layout.cy;
-    this.scale = IMG_SCALES[name] ?? 0.8;
-    // base transform (rest pose), mutated by tweens:
-    this.rot = 0;        // degrees
+    this.origin = m.origin;   // [ox, oy] unified-image px (top-left of crop)
+    this.w = m.size[0];       // crop width px
+    this.h = m.size[1];       // crop height px
+    this.cx = pivot[0];       // pivot, layer-local px
+    this.cy = pivot[1];
+    this.scale = 1;           // base scale multiplier (rest pose = 1)
+    this.rot = 0;             // degrees
     this.sx = 1;
     this.sy = 1;
-    this.ox = 0;         // extra offset px (model space)
+    this.ox = 0;              // extra world offset px (unified coords)
     this.oy = 0;
     this.alpha = 1;
-    this.z = layout.z;
   }
 }
+
+// Arms are drawn ONLY during gestures (fade in/out) so that the rest pose stays
+// perfectly clean — the arm crops contain torso fabric that can't be fully
+// separated from the artwork without regenerating it. Gestures still raise
+// the hand convincingly for the gesture's duration.
 
 export function initSpriteRig(canvasEl) {
   const ctx = canvasEl.getContext('2d');
   const nodes = {};
-  let loaded = 0;
-  const total = Object.keys(ASSETS).length;
+  let manifest = null;
 
   // --- load assets ----------------------------------------------------------
+  // cache-buster: bump ASSET_VER whenever layer PNGs change
+  const ASSET_VER = 16;
+
   function loadAsset(name, src) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => { nodes[name] = new Node(name, img, LAYOUT[name]); loaded++; resolve(); };
+      img.onload = () => {
+        nodes[name] = new Node(name, img, manifest, PIVOTS[name]);
+        if (name === 'arm_l' || name === 'arm_r') nodes[name].alpha = 0;
+        resolve();
+      };
       img.onerror = () => { console.warn('[sprite-rig] failed to load', src); resolve(); };
-      img.src = src;
+      img.src = src + '?v=' + ASSET_VER;
     });
   }
 
   // --- rig state ------------------------------------------------------------
   let W = 0, H = 0, viewScale = 1, viewX = 0, viewY = 0;
+  const UW = 1632, UH = 2176;   // unified artwork space
   let time = 0;
   let lipLevel = 0;          // 0..1 amplitude from audio
   let lipSmoothed = 0;
-  let emotion = 'neutral';   // current blended emotion target
-  let emotionBlend = 0;      // 0..1 blend towards current target
-  let gestureQueue = [];     // {name, startedAt, duration}
+  let emotion = 'neutral';
+  let emotionBlend = 0;
+  let gestureQueue = [];
   let currentGesture = null;
   let blink = { active: false, startedAt: 0, nextAt: 0 };
   let breathPhase = Math.random() * Math.PI * 2;
@@ -115,22 +120,16 @@ export function initSpriteRig(canvasEl) {
     H = parent ? parent.clientHeight : window.innerHeight;
     canvasEl.width = W;
     canvasEl.height = H;
-    // ANCHOR MODEL: LAYOUT anchors are screen-space positions in an 800x1000
-    // "screen canvas" (from the tuned compose preview). We scale that whole
-    // canvas to fill the real canvas: viewScale maps 800x1000 -> fit.
-    // Anchors scale with viewScale; node pivots (cx, cy) and local offsets
-    // scale the same way so the composition is preserved exactly.
-    const modelW = 800, modelH = 1000;
-    const scaleX = (W * 0.98) / modelW;
-    const scaleY = (H * 0.98) / modelH;
-    viewScale = Math.min(scaleX, scaleY);
-    viewX = (W - modelW * viewScale) / 2;
-    viewY = (H - modelH * viewScale) / 2;
+    // Scale unified-image space to fill ~96% of canvas height, keep aspect.
+    viewScale = Math.min((W * 0.96) / UW, (H * 0.96) / UH);
+    viewX = (W - UW * viewScale) / 2;
+    viewY = (H - UH * viewScale) / 2;
   }
 
   // --- gesture system -------------------------------------------------------
-  // A gesture is a function(g, t) -> void where g gives bone access and t is
-  // eased progress 0..1 over duration.
+  // Gestures are tweens. Arm raises rotate around the shoulder-top pivot at
+  // the top of the arm crop; the arm crop hangs below the pivot like a real
+  // limb, so rotation lands the hand exactly on the hair — no bend hacks.
   const GESTURES = {};
 
   function bone(b) { return nodes[b]; }
@@ -145,49 +144,54 @@ export function initSpriteRig(canvasEl) {
     if (!currentGesture) currentGesture = gestureQueue.shift();
   }
 
-  // touch_hair: right arm raises with a "bent elbow" (scale compression)
-  // so her hand reaches up and strokes the side of her hair; hair sways.
-  // Kinematics note: the arm hangs ~683 model-px below its shoulder anchor,
-  // so a plain rotation overshoots far past the head. Compressing the arm
-  // (scale < 1) mimics a bent elbow and lands the hand ON the hair.
+  // touch_hair: right arm slides up along her side and reaches her side lock,
+  // with two soft strokes and hair sway. Motion is mostly vertical (the arm
+  // keeps its straight pose from the artwork) with a tiny lean toward the
+  // lock; the big rotation sweeps that caused the blocky artifact are gone.
   addGesture('touch_hair', 3200, (g, t) => {
     const arm = g('arm_r');
     if (t < 0.45) {
       const k = EASE.inOutCubic(t / 0.45);
-      arm.rot = lerp(0, -165, k);            // elbow raises toward hair
-      arm.sx = lerp(1, 0.52, k);             // bent-elbow compression
-      arm.sy = lerp(1, 0.52, k);
+      arm.oy = lerp(0, -330, k);             // slide the arm up toward her hair
+      arm.ox = lerp(0, -70, k);              // lean slightly toward the lock
+      arm.sy = lerp(1, 0.72, k);             // forearm-fold illusion
+      arm.rot = lerp(0, -6, k);              // tiny lean, no big sweep
     } else if (t < 0.75) {
       const k = (t - 0.45) / 0.30;
-      arm.rot = -165 + Math.sin(k * Math.PI * 2.5) * 5; // stroke jitter
+      arm.oy = -330 + Math.sin(k * Math.PI * 2.5) * 14; // two strokes
+      arm.ox = -70 + Math.sin(k * Math.PI * 2.5) * 6;
       const hair = g('back_hair');
       hair.rot = Math.sin(k * Math.PI * 3) * 4;
     } else {
       const k = EASE.outCubic((t - 0.75) / 0.25);
-      arm.rot = lerp(-165, 0, k);
-      arm.sx = lerp(0.52, 1, k);
-      arm.sy = lerp(0.52, 1, k);
+      arm.oy = lerp(-330, 0, k);
+      arm.ox = lerp(-70, 0, k);
+      arm.sy = lerp(0.72, 1, k);
+      arm.rot = lerp(-6, 0, k);
     }
   });
 
-  // play_hair: left arm tucks a side lock (bent-elbow raise, twirl jitter)
+  // play_hair: left arm slides up to twirl her other side lock.
   addGesture('play_hair', 2600, (g, t) => {
     const arm = g('arm_l');
     if (t < 0.4) {
       const k = EASE.inOutCubic(t / 0.4);
-      arm.rot = lerp(0, 165, k);
-      arm.sx = lerp(1, 0.52, k);
-      arm.sy = lerp(1, 0.52, k);
+      arm.oy = lerp(0, -330, k);
+      arm.ox = lerp(0, 70, k);               // lean toward her left lock
+      arm.sy = lerp(1, 0.72, k);
+      arm.rot = lerp(0, 6, k);
     } else if (t < 0.7) {
       const k = (t - 0.4) / 0.3;
-      arm.rot = 165 + Math.sin(k * Math.PI * 2) * 5; // twirl around the lock
+      arm.oy = -330 + Math.sin(k * Math.PI * 2) * 14;   // twirl strokes
+      arm.ox = 70 + Math.sin(k * Math.PI * 2) * 6;
       const hair = g('back_hair');
       hair.rot = Math.sin(k * Math.PI * 2.5) * 3.5;
     } else {
       const k = EASE.outCubic((t - 0.7) / 0.3);
-      arm.rot = lerp(165, 0, k);
-      arm.sx = lerp(0.52, 1, k);
-      arm.sy = lerp(0.52, 1, k);
+      arm.oy = lerp(-330, 0, k);
+      arm.ox = lerp(70, 0, k);
+      arm.sy = lerp(0.72, 1, k);
+      arm.rot = lerp(6, 0, k);
     }
   });
 
@@ -206,15 +210,16 @@ export function initSpriteRig(canvasEl) {
     const arm = g('arm_r');
     if (t < 0.3) {
       const k = EASE.inOutCubic(t / 0.3);
-      arm.rot = lerp(0, -120, k);
-      arm.ox = lerp(0, -35, k);
+      arm.oy = lerp(0, -380, k);             // lift the arm up beside her head
+      arm.rot = lerp(0, -16, k);             // outward tilt
     } else if (t < 0.85) {
       const k = (t - 0.3) / 0.55;
-      arm.rot = -120 + Math.sin(k * Math.PI * 5) * 22; // waving
+      arm.rot = -16 + Math.sin(k * Math.PI * 5) * 12; // waving
+      arm.oy = -380 + Math.sin(k * Math.PI * 5) * 10;
     } else {
       const k = EASE.outCubic((t - 0.85) / 0.15);
-      arm.rot = lerp(-120, 0, k);
-      arm.ox = lerp(-35, 0, k);
+      arm.oy = lerp(-380, 0, k);
+      arm.rot = lerp(-16, 0, k);
     }
   });
 
@@ -231,16 +236,16 @@ export function initSpriteRig(canvasEl) {
     const arm = g('arm_r');
     if (t < 0.35) {
       const k = EASE.outCubic(t / 0.35);
-      arm.rot = lerp(0, -80, k);
-      arm.ox = lerp(0, -55, k);
-      arm.oy = lerp(0, -15, k);
+      arm.rot = lerp(0, -8, k);              // extend out toward viewer
+      arm.ox = lerp(0, -60, k);
+      arm.oy = lerp(0, -40, k);
     } else if (t < 0.65) {
-      arm.rot = -80 + Math.sin((t - 0.35) * Math.PI * 4) * 8;
+      arm.rot = -8 + Math.sin((t - 0.35) * Math.PI * 4) * 4;
     } else {
       const k = EASE.outCubic((t - 0.65) / 0.35);
-      arm.rot = lerp(-80, 0, k);
-      arm.ox = lerp(-55, 0, k);
-      arm.oy = lerp(-15, 0, k);
+      arm.rot = lerp(-8, 0, k);
+      arm.ox = lerp(-60, 0, k);
+      arm.oy = lerp(-40, 0, k);
     }
   });
 
@@ -252,8 +257,6 @@ export function initSpriteRig(canvasEl) {
   });
 
   // --- emotion blending -----------------------------------------------------
-  // Emotions overlay on top of the idle pose and gesture layer.
-  // Returns per-node deltas applied each frame: {head:{rot,sx,sy}, ...}
   function emotionDeltas() {
     const b = emotionBlend; // how far we are toward the target emotion
     switch (emotion) {
@@ -295,7 +298,7 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- blink ----------------------------------------------------------------
-  function updateBlink(now, dt) {
+  function updateBlink(now) {
     if (!blink.active && now > blink.nextAt) {
       blink.active = true;
       blink.startedAt = now;
@@ -310,69 +313,62 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- render ---------------------------------------------------------------
-  function worldToScreen(wx, wy) {
-    return [viewX + wx * viewScale, viewY + wy * viewScale];
-  }
-
+  // Draw a node at its source origin (screen px), rotating around
+  // anchor = origin*vs (world offset scaled in), pivot at local (cx,cy).
   function drawNode(node) {
     if (!node.img.complete || !node.img.naturalWidth) return;
-    const iw = node.img.naturalWidth, ih = node.img.naturalHeight;
-    // screen-space anchor = screen-space anchor px * viewScale + offset
-    const ax = viewX + (node.anchor[0] + node.ox) * viewScale;
-    const ay = viewY + (node.anchor[1] + node.oy) * viewScale;
-    // local pivot of the image (in its own pixel space), scaled to screen.
-    // Rotation pivots around this point so e.g. the shoulder stays fixed.
-    const px = node.cx * viewScale * node.sx;
-    const py = node.cy * viewScale * node.sy;
+    const vs = viewScale;
+    const s = node.scale * vs;
+    // anchor in screen px: source origin scaled + world offsets scaled
+    const ax = viewX + (node.origin[0] + node.ox) * vs;
+    const ay = viewY + (node.origin[1] + node.oy) * vs;
 
+    // The image top-left must land exactly at origin*vs (source placement).
+    // Rotation pivots around (origin + local pivot)*vs, achieved by shifting
+    // the translate to include the pivot, then drawing offset by the pivot.
     ctx.save();
     ctx.globalAlpha = clamp(node.alpha, 0, 1);
-    ctx.translate(ax, ay);
+    ctx.translate(ax + node.cx * s, ay + node.cy * s);
     if (node.rot) ctx.rotate((node.rot * Math.PI) / 180);
-    ctx.drawImage(node.img, -px, -py, iw * viewScale * node.sx, ih * viewScale * node.sy);
+    ctx.drawImage(node.img, -node.cx * s, -node.cy * s, node.w * s, node.h * s);
     ctx.restore();
   }
 
   function drawMouth() {
-    // mouth patch drawn ON the head in head-local pixel coords, so it follows
-    // head rotation/offset automatically. Transform to screen space by going
-    // through the head pivot (same anchor math as drawNode).
+    // Mouth patch drawn in head-layer-local px so it follows head motion.
+    // We compute the head's current screen-space transform (same math as
+    // drawNode) and draw the oval in that frame.
     const head = nodes.head;
+    const vs = viewScale;
+    const s = head.scale * vs;
+    const ax = viewX + (head.origin[0] + head.ox) * vs;
+    const ay = viewY + (head.origin[1] + head.oy) * vs;
     const local = [MOUTH_LOCAL[0], MOUTH_LOCAL[1]];
-    // screen-space head pivot (anchor = head screen pos; pivot offset inside
-    // the head image scaled to screen)
-    const pivotX = viewX + (head.anchor[0] + head.ox) * viewScale;
-    const pivotY = viewY + (head.anchor[1] + head.oy) * viewScale;
-    const pcx = head.cx * viewScale * head.sx;
-    const pcy = head.cy * viewScale * head.sy;
 
+    // anchor here is the head image top-left; rotate around pivot like drawNode
     ctx.save();
-    ctx.translate(pivotX, pivotY);
+    ctx.translate(ax + head.cx * s, ay + head.cy * s);
     if (head.rot) ctx.rotate((head.rot * Math.PI) / 180);
-    // local position relative to the pivot, scaled to screen
-    const lx = (local[0] - head.cx) * viewScale * head.sx;
-    const ly = (local[1] - head.cy) * viewScale * head.sy;
+    const lx = (local[0] - head.cx) * s;
+    const ly = (local[1] - head.cy) * s;
 
-    // lip-sync amplitude: map 0..1 to mouth opening
+    // lip-sync amplitude: map 0..1 to mouth opening (sizes scale with vs)
     lipSmoothed = lerp(lipSmoothed, lipLevel, 0.45);
     const open = clamp(lipSmoothed, 0, 1);
     if (open > 0.06) {
-      // dark oval that grows with amplitude, sits just under the smile line
-      // (sizes in screen pixels; ~0.06 viewScale -> scale from model px)
-      const s = viewScale;
-      const w = lerp(12 * s, 34 * s, open);
-      const h = lerp(7 * s, 22 * s, open);
+      const w = lerp(12 * vs, 34 * vs, open);
+      const h = lerp(7 * vs, 22 * vs, open);
       ctx.globalAlpha = clamp(open * 1.4, 0, 0.95);
       ctx.fillStyle = '#5a1e22';
       ctx.beginPath();
-      ctx.ellipse(lx, ly + 1 * s, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.ellipse(lx, ly + 1 * vs, w / 2, h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       // pink interior for bigger openings
       if (open > 0.4) {
         ctx.globalAlpha = clamp((open - 0.4) * 2, 0, 0.9);
         ctx.fillStyle = '#ff8a95';
         ctx.beginPath();
-        ctx.ellipse(lx, ly + 5 * s, (w * 0.55) / 2, (h * 0.6) / 2, 0, 0, Math.PI * 2);
+        ctx.ellipse(lx, ly + 5 * vs, (w * 0.55) / 2, (h * 0.6) / 2, 0, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -384,10 +380,10 @@ export function initSpriteRig(canvasEl) {
     // background is transparent by design (canvas alpha preserved)
 
     // idle motion (only gently modulate rest pose)
-    breathPhase += 0.0022 * (16.67 / 16.67); // ~1 breath per ~4.5s
+    breathPhase += 0.0022; // ~1 breath per ~4.5s
     driftPhase += 0.0015;
     hairPhase += 0.003;
-    const breathing = Math.sin(breathPhase) * 0.012;
+    const breathing = Math.sin(breathPhase) * 0.008;
     const drift = Math.sin(driftPhase) * 1.2;
     const hairSway = Math.sin(hairPhase) * 2.2 + Math.sin(hairPhase * 0.5) * 1.5;
 
@@ -426,13 +422,22 @@ export function initSpriteRig(canvasEl) {
     if (currentGesture) {
       const t = clamp((now - currentGesture.start) / currentGesture.duration, 0, 1);
       const eased = EASE.inOutCubic(t);
-      // reset bones each frame the gesture owns (keeps tweens composable)
       currentGesture.fn(bone, eased);
       if (t >= 1) {
-        // restore bones the gesture touched (simple full rest for the tween
-        // duration aftermath): rotations handled by decay above
         currentGesture = gestureQueue.shift() || null;
       }
+    }
+
+    // arm fade: arms hidden at rest, fade in while an arm gesture runs,
+    // fade out shortly after the gesture queue empties
+    // which arm each gesture animates (the other arm stays hidden at rest)
+    const armMap = { touch_hair: 'arm_r', play_hair: 'arm_l', wave: 'arm_r', point: 'arm_r' };
+    const activeArm = currentGesture ? armMap[currentGesture.name] : null;
+    for (const armName of ['arm_l', 'arm_r']) {
+      if (!nodes[armName]) continue;
+      const target = armName === activeArm ? 1 : 0;
+      const k = armName === activeArm ? 0.25 : 0.12;
+      nodes[armName].alpha = lerp(nodes[armName].alpha, target, k);
     }
 
     updateBlink(now);
@@ -444,13 +449,10 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- ticker ---------------------------------------------------------------
-  // The sprite rig owns its own render loop (rAF); the Live2D path ticks
-  // inside PIXI's ticker, but here we drive frames ourselves.
   let last = 0;
   let rafId = 0;
   function ticker(now) {
     if (!last) last = now;
-    const dt = Math.min(now - last, 50);
     last = now;
     time = now / 1000;
     renderFrame(now);
@@ -458,7 +460,17 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- public API (mirrors emotion-animator.js surface) ---------------------
-  return Promise.all(Object.entries(ASSETS).map(([k, v]) => loadAsset(k, v)))
+  return fetch(MANIFEST_SRC)
+    .then((r) => { if (!r.ok) throw new Error('manifest load failed'); return r.json(); })
+    .then((m) => {
+      manifest = Object.assign({}, m);
+      // blush overlay: two soft pink cheek spots covering unified x 400..1240,
+      // y 640..800 (placed as a fixed-origin overlay, NOT in the layer manifest)
+      manifest.blush = { origin: [400, 640], size: [840, 160] };
+      const assetNames = Object.keys(m);
+      return Promise.all(assetNames.map((name) => loadAsset(name, `model/luna/${name}.png`)));
+    })
+    .then(() => loadAsset('blush', 'model/luna/blush.png'))
     .then(() => {
       fitToCanvas();
       window.addEventListener('resize', fitToCanvas);
@@ -476,6 +488,12 @@ export function initSpriteRig(canvasEl) {
         playGesture: (name) => runGesture(name),
         // manual lip level setter (fallback)
         setLipLevel: (v) => { lipLevel = v; },
+        // debug accessors
+        __bone: (name) => nodes[name],
+        __gesture: () => currentGesture,
+        __viewScale: () => viewScale,
+        __viewX: () => viewX,
+        __viewY: () => viewY,
       };
     });
 }
