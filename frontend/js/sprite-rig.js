@@ -1,25 +1,26 @@
-// sprite-rig.js — Luna, a custom rigged 2D anime girl (v3, seamless layers +
-// pre-rendered raised-arm pose overlays for the big arm gestures).
+// sprite-rig.js — Luna, a custom rigged 2D anime girl (v4, hierarchical rig).
 //
-// All layers are native-size crops cut from ONE unified artwork
-// (unified_base.png 1632x2176). Each layer keeps its exact source origin, so
-// placing every crop at its origin makes the character one seamless piece.
+// v4 REWRITE — the whole point: she moves like ONE cohesive 2D anime
+// character. Every seam stays glued because motion is hierarchical:
 //
-// Transform model (origin-based, no padding):
-//   - Node stores origin=[ox,oy] in unified-image px and size=[w,h] (crop px)
-//   - viewScale (vs) maps unified px -> screen px (fits canvas)
-//   - Anchor screen pos: ax = origin[0]*vs (+ world offset), ay = origin[1]*vs
-//   - drawImage(img, ax - cx*s, ay - cy*s, w*s, h*s) with s = scale*vs
-//     (rotation pivots at the anchor; (cx,cy) is the pivot in layer-local px)
+//   ROOT (whole character)
+//     ├─ breath bob: ALL layers share one small Y offset
+//     ├─ body      : torso + arms + hair roots live here (never scales)
+//     ├─ head      : rotates around the NECK junction (measured pivot)
+//     │    └─ mouth patch follows the head transform
+//     └─ back_hair : sways slightly AND follows the head (never alone)
 //
 // Capabilities:
-//   - idle: breathing, hair sway, subtle head drift, periodic blink
+//   - idle: whole-body breathing bob, subtle hair sway, periodic blink
 //   - gestures: touch_hair, play_hair, head_shake, head_nod, wave, giggle,
 //               point, blush (timeline tweens on the bones)
 //   - emotion blending: happy / sad / surprised / blush / laugh / worried /
 //               neutral (overlays on top of the idle pose)
 //   - lip sync: an external amplitude getter (Web Audio analyser) drives a
 //               canvas-drawn mouth patch over the smile line
+//
+// All layers are native-size crops cut from ONE unified artwork
+// (unified_base.png 1632x2176) and placed at their exact source origin.
 
 const MANIFEST_SRC = 'model/luna/manifest.json';
 
@@ -28,18 +29,22 @@ const MANIFEST_SRC = 'model/luna/manifest.json';
 // from bent-arm variants of the same unified artwork; they draw at their
 // manifest origin during the matching gesture (small bounce added), so the
 // raised hand reads as a real hand with no rotation sweep artifact.
-// Pivot (cx, cy) in each layer's own pixel space:
-//   body       (748, 1053) — torso center (breathing pivot)
-//   arm_l      (326,   0)  — shoulder top (arm hangs down; raising rotates)
-//   arm_r      (339,   0)  — shoulder top
-//   head       (522,   0)  — top center of the head crop (nod/tilt pivot)
-//   back_hair  (408,   0)  — top of the back-hair strip (sway pivot)
+//
+// PIVOTS (layer-local px) — measured from the seams:
+//   body       (748, 1053) — torso center (kept only as fallback; v4 no scale)
+//   arm_l      (26,   0)   — shoulder top of the strip crop (unused in v4)
+//   arm_r      (197,   0)  — shoulder top of the strip crop (unused in v4)
+//   head       (536, 135)  — the NECK junction: where the head crop narrows
+//                            into the neck (NOT the top of the head). The head
+//                            swings at its own neck like a real character.
+//   back_hair  (408,   0)  — top of the back-hair strip (small sway, follows
+//                            the head; never moves alone)
 const PIVOTS = {
   back_hair: [408, 0],
   body: [748, 1053],
   arm_l: [26, 0],
   arm_r: [197, 0],
-  head: [522, 0],
+  head: [536, 135],
   blush: [420, 80],
   arm_r_wave: [0, 0],
   arm_r_touch: [0, 0],
@@ -79,7 +84,7 @@ class Node {
   }
 }
 
-  // Arm layers are drawn only during their gesture (fade in/out) so the rest
+// Arm layers are drawn only during their gesture (fade in/out) so the rest
 // pose stays perfectly clean. The raised-hand motion itself comes from
 // pose overlay layers (arm_r_touch / arm_r_wave / arm_l_play) cut from
 // bent-arm variants of the unified artwork, not from rotating the strip.
@@ -91,7 +96,7 @@ export function initSpriteRig(canvasEl) {
 
   // --- load assets ----------------------------------------------------------
   // cache-buster: bump ASSET_VER whenever layer PNGs change
-  const ASSET_VER = 18;
+  const ASSET_VER = 19;
 
   function loadAsset(name, src) {
     return new Promise((resolve) => {
@@ -110,6 +115,9 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- rig state ------------------------------------------------------------
+  // HIERARCHICAL ROOT (v4): one shared transform carries the whole character.
+  // Nothing moves independently — every layer draws with (rootOx, rootOy) so
+  // breathing can never open a seam at the neck, shoulders, or hair roots.
   let W = 0, H = 0, viewScale = 1, viewX = 0, viewY = 0;
   const UW = 1632, UH = 2176;   // unified artwork space
   let time = 0;
@@ -125,6 +133,8 @@ export function initSpriteRig(canvasEl) {
   let breathPhase = Math.random() * Math.PI * 2;
   let driftPhase = Math.random() * Math.PI * 2;
   let hairPhase = Math.random() * Math.PI * 2;
+  let rootOx = 0;            // unified px — shared by ALL layers
+  let rootOy = 0;
 
   function fitToCanvas() {
     const parent = canvasEl.parentElement;
@@ -139,9 +149,9 @@ export function initSpriteRig(canvasEl) {
   }
 
   // --- gesture system -------------------------------------------------------
-  // Gestures are tweens. Arm raises rotate around the shoulder-top pivot at
-  // the top of the arm crop; the arm crop hangs below the pivot like a real
-  // limb, so rotation lands the hand exactly on the hair — no bend hacks.
+  // Gestures are tweens that stay hierarchical: the head always rotates
+  // around its neck-junction pivot, the body carries everything via the
+  // shared root bob, and no per-layer translation can break a seam.
   const GESTURES = {};
 
   function bone(b) { return nodes[b]; }
@@ -156,103 +166,100 @@ export function initSpriteRig(canvasEl) {
     if (!currentGesture) currentGesture = gestureQueue.shift();
   }
 
-    // touch_hair: right arm swings as an arc from the shoulder (pivot rotation,
-  // never a slide) so the hand stays attached at the shoulder the whole time
-  // and the hand sweeps up to stroke her side lock, with two soft strokes.
   // touch_hair: the pre-rendered bent-arm overlay draws the hand already at
-  // her hair; only a tiny rotation nudge (+ strokes on the hair) sells motion.
+  // her hair; a subtle tilt of the head toward the raised hand plus a gentle
+  // hair nudge sells the motion — nothing slides.
   addGesture('touch_hair', 3200, (g, t) => {
-    if (t < 0.35) {
-      const k = EASE.inOutCubic(t / 0.35);
-      g('arm_r').rot = lerp(0, -5, k);
-    } else if (t < 0.75) {
-      const k = (t - 0.35) / 0.40;
-      g('arm_r').rot = -5 + Math.sin(k * Math.PI * 2.5) * 2;
-      const hair = g('back_hair');
-      hair.rot = Math.sin(k * Math.PI * 3) * 4;
-    } else {
-      const k = EASE.outCubic((t - 0.75) / 0.25);
-      g('arm_r').rot = lerp(-5, 0, k);
-    }
-    return { drivesArm: true };
-  });
-  // play_hair: left arm swings up from her shoulder to twirl her other lock.
-  addGesture('play_hair', 2600, (g, t) => {
-    const arm = g('arm_l');
     if (t < 0.4) {
       const k = EASE.inOutCubic(t / 0.4);
-      arm.rot = lerp(0, 14, k);
-    } else if (t < 0.7) {
-      const k = (t - 0.4) / 0.3;
-      arm.rot = 14 + Math.sin(k * Math.PI * 2) * 4;     // twirl strokes
+      g('head').rot = lerp(0, -4, k);           // slight lean toward her right
+    } else if (t < 0.8) {
+      const k = (t - 0.4) / 0.4;
+      g('head').rot = -4 + Math.sin(k * Math.PI * 1.5) * 2.5;
       const hair = g('back_hair');
-      hair.rot = Math.sin(k * Math.PI * 2.5) * 3.5;
+      hair.rot = Math.sin(k * Math.PI * 2) * 2.5;
     } else {
-      const k = EASE.outCubic((t - 0.7) / 0.3);
-      arm.rot = lerp(14, 0, k);
+      const k = EASE.outCubic((t - 0.8) / 0.2);
+      g('head').rot = lerp(-4, 0, k);
     }
-    return { drivesArm: true };
+    return { drivesHead: true };
+  });
+
+  // play_hair: left arm sweep with the raised-arm overlay; head tilts the
+  // opposite way (a natural "tweaking her hair" look), hair sways in sync.
+  addGesture('play_hair', 2600, (g, t) => {
+    if (t < 0.35) {
+      const k = EASE.inOutCubic(t / 0.35);
+      g('head').rot = lerp(0, 5, k);
+    } else if (t < 0.75) {
+      const k = (t - 0.35) / 0.4;
+      g('head').rot = 5 + Math.sin(k * Math.PI * 2) * 3;
+      g('back_hair').rot = Math.sin(k * Math.PI * 2.2) * 3;
+    } else {
+      const k = EASE.outCubic((t - 0.75) / 0.25);
+      g('head').rot = lerp(5, 0, k);
+    }
+    return { drivesHead: true };
   });
 
   addGesture('head_shake', 2000, (g, t) => {
     const head = g('head');
     const swings = 3;
+    // rotation around the NECK junction — the chin stays pinned to the collar
     head.rot = Math.sin(t * Math.PI * 2 * swings) * 9 * (1 - t * 0.5);
     return { drivesHead: true };
   });
+
   addGesture('head_nod', 1500, (g, t) => {
     const head = g('head');
-    head.rot = Math.sin(t * Math.PI * 2) * 7 * (1 - t);
+    // two dips, rotating at the neck — the face dips toward the chest
+    head.rot = Math.sin(t * Math.PI * 4) * 7 * (1 - t * 0.4);
     return { drivesHead: true };
   });
 
   // wave: pre-rendered raised-arm overlay (hand up beside head) bounces with
-  // the hand while waving; the strip itself only rotates a few degrees.
+  // the hand while waving; the head tilts toward the raised arm like a real
+  // greeting — the two motions are synced, never independent.
   addGesture('wave', 2500, (g, t) => {
-    const arm = g('arm_r');
     if (t < 0.3) {
       const k = EASE.inOutCubic(t / 0.3);
-      arm.rot = lerp(0, -6, k);
+      g('head').rot = lerp(0, -5, k);
     } else if (t < 0.85) {
       const k = (t - 0.3) / 0.55;
-      arm.rot = -6 + Math.sin(k * Math.PI * 2) * 3;
+      g('head').rot = -5 + Math.sin(k * Math.PI * 4) * 2.5;
     } else {
       const k = EASE.outCubic((t - 0.85) / 0.15);
-      arm.rot = lerp(-6, 0, k);
+      g('head').rot = lerp(-5, 0, k);
     }
-    return { drivesArm: true };
-  });
-
-  addGesture('giggle', 2000, (g, t) => {
-    const body = g('body');
-    const head = g('head');
-    const k = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
-    body.oy = Math.sin(t * Math.PI * 6) * 5 * k;      // bouncing
-    head.rot = Math.sin(t * Math.PI * 4) * 5 * k;
-    head.sy = lerp(1, 1.03, Math.abs(Math.sin(t * Math.PI * 3)) * k);
     return { drivesHead: true };
   });
 
-  // point: small rotation nudge (subtle, no visible sweep at -8deg) plus a
-  // quick forward-outward pulse.
+  // giggle: the WHOLE character (root bob) chuckles in sync with the head —
+  // body, head, and hair all move together so no seam ever jumps.
+  addGesture('giggle', 2000, (g, t) => {
+    const head = g('head');
+    const k = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
+    // whole-character chuckle bob (shared root, so every layer gets it)
+    rootOy += Math.sin(t * Math.PI * 6) * 4.5 * k;
+    head.rot = Math.sin(t * Math.PI * 3) * 4.5 * k;
+    g('back_hair').rot = Math.sin(t * Math.PI * 2.5) * 2.5 * k;
+    return { drivesHead: true };
+  });
+
+  // point: the raised-arm overlay does the pointing; the head gives a tiny
+  // tilt in the same direction. No strip sliding — nothing leaves the body.
   addGesture('point', 1500, (g, t) => {
-    const arm = g('arm_r');
     if (t < 0.35) {
       const k = EASE.outCubic(t / 0.35);
-      arm.rot = lerp(0, -8, k);
-      arm.oy = lerp(0, -45, k);
-      arm.ox = lerp(0, -30, k);
+      g('head').rot = lerp(0, -4, k);
     } else if (t < 0.65) {
-      const pulse = Math.sin((t - 0.35) * Math.PI * 4) * 2;
-      arm.rot = -8 + pulse;
-      arm.oy = -45 + Math.sin((t - 0.35) * Math.PI * 4) * 8;
+      const pulse = Math.sin((t - 0.35) * Math.PI * 4) * 1.5;
+      g('head').rot = -4 + pulse;
     } else {
       const k = EASE.outCubic((t - 0.65) / 0.35);
-      arm.rot = lerp(-8, 0, k);
-      arm.oy = lerp(-45, 0, k);
-      arm.ox = lerp(-30, 0, k);
+      g('head').rot = lerp(-4, 0, k);
     }
-    return { drivesArm: true };
+    return { drivesHead: true };
   });
 
   addGesture('blush', 2400, (g, t) => {
@@ -267,17 +274,19 @@ export function initSpriteRig(canvasEl) {
     const b = emotionBlend; // how far we are toward the target emotion
     switch (emotion) {
       case 'happy':
-        return { head: { rot: 4 * b, sy: 1.02 + 0.02 * b }, blush: { alpha: 0.55 * b } };
+        return { head: { rot: 4 * b }, blush: { alpha: 0.55 * b } };
       case 'sad':
-        return { head: { rot: -5 * b, oy: 4 * b } };
+        return { head: { rot: -4 * b } };
       case 'surprised':
-        return { head: { rot: -3 * b, sy: 1.05 * b, oy: -3 * b } };
+        return { head: { rot: -3 * b } };
       case 'blush':
-        return { blush: { alpha: b }, head: { rot: 6 * b } };
+        return { blush: { alpha: b }, head: { rot: 4 * b } };
       case 'laugh':
-        return { head: { rot: Math.sin(time * 12) * 6 * b, sy: 1.03 + 0.03 * b } };
+        // subtle tilt only — the chuckle bob comes from the shared root,
+        // never from a jittery per-layer rotation (removed in v4)
+        return { head: { rot: 2 * b } };
       case 'worried':
-        return { head: { rot: 3 * b, oy: 2 * b }, body: { oy: 2 * b } };
+        return { head: { rot: 3 * b } };
       default:
         return { blush: { alpha: 0 } };
     }
@@ -325,9 +334,9 @@ export function initSpriteRig(canvasEl) {
     if (!node.img.complete || !node.img.naturalWidth) return;
     const vs = viewScale;
     const s = node.scale * vs;
-    // anchor in screen px: source origin scaled + world offsets scaled
-    const ax = viewX + (node.origin[0] + node.ox) * vs;
-    const ay = viewY + (node.origin[1] + node.oy) * vs;
+    // anchor in screen px: source origin scaled + root offset + world offsets scaled
+    const ax = viewX + (node.origin[0] + rootOx + node.ox) * vs;
+    const ay = viewY + (node.origin[1] + rootOy + node.oy) * vs;
 
     // The image top-left must land exactly at origin*vs (source placement).
     // Rotation pivots around (origin + local pivot)*vs, achieved by shifting
@@ -347,8 +356,8 @@ export function initSpriteRig(canvasEl) {
     const head = nodes.head;
     const vs = viewScale;
     const s = head.scale * vs;
-    const ax = viewX + (head.origin[0] + head.ox) * vs;
-    const ay = viewY + (head.origin[1] + head.oy) * vs;
+    const ax = viewX + (head.origin[0] + rootOx + head.ox) * vs;
+    const ay = viewY + (head.origin[1] + rootOy + head.oy) * vs;
     const local = [MOUTH_LOCAL[0], MOUTH_LOCAL[1]];
 
     // anchor here is the head image top-left; rotate around pivot like drawNode
@@ -372,7 +381,7 @@ export function initSpriteRig(canvasEl) {
       // pink interior for bigger openings
       if (open > 0.4) {
         ctx.globalAlpha = clamp((open - 0.4) * 2, 0, 0.9);
-        ctx.fillStyle = '#ff8a95';
+        ctx.fillStyle = '#e8a0a4';
         ctx.beginPath();
         ctx.ellipse(lx, ly + 5 * vs, (w * 0.55) / 2, (h * 0.6) / 2, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -386,19 +395,22 @@ export function initSpriteRig(canvasEl) {
     ctx.clearRect(0, 0, W, H);
     // background is transparent by design (canvas alpha preserved)
 
-    // idle motion (only gently modulate rest pose)
+    // --- hierarchical idle motion (v4) -------------------------------------
+    // ROOT-level breathing: a slow whole-character Y bob. Every layer draws
+    // with (rootOx, rootOy), so the torso, head, hair, and arms all rise and
+    // fall together — breathing can never open the neck seam.
     breathPhase += 0.0022; // ~1 breath per ~4.5s
     driftPhase += 0.0015;
     hairPhase += 0.003;
-    const breathing = Math.sin(breathPhase) * 0.008;
-    const drift = Math.sin(driftPhase) * 1.2;
-    const hairSway = Math.sin(hairPhase) * 2.2 + Math.sin(hairPhase * 0.5) * 1.5;
+    rootOy = Math.sin(breathPhase) * 1.8;          // unified px (~1.8px)
+    rootOx = Math.sin(driftPhase) * 0.6;           // whole-character drift
+    // back_hair sways slightly AND follows the head; never on its own
+    if (nodes.back_hair) {
+      nodes.back_hair.rot = (Math.sin(hairPhase) * 1.6) + (nodes.head ? nodes.head.rot * 0.25 : 0);
+    }
+    // no per-layer sy/ox breathing anymore — the root bob carries it all
 
-    if (nodes.body) { nodes.body.sy = 1 + breathing; }
-    if (nodes.back_hair) { nodes.back_hair.rot = hairSway; }
-    if (nodes.head) { nodes.head.ox = drift; }
-
-    // blink: squash head vertically very briefly
+    // blink: squash head vertically very briefly (only the head closes its eyes)
     if (blink.active) {
       const el = now - blink.startedAt;
       const t = el / 140;
@@ -419,29 +431,29 @@ export function initSpriteRig(canvasEl) {
       if (delta.oy !== undefined) n.oy += delta.oy * 0.1;
       if (delta.alpha !== undefined) n.alpha = lerp(n.alpha, delta.alpha, 0.1);
     }
-        // gesture update
+
+    // gesture update
     let gFlags = {};
     if (currentGesture) {
       const t = clamp((now - currentGesture.start) / currentGesture.duration, 0, 1);
       gFlags = currentGesture.fn(bone, t) || {};
-            if (t >= 1) {
+      if (t >= 1) {
         currentGesture = gestureQueue.shift() || null;
       }
     }
+
     // decay head rot back to idle when no emotion/gesture drives it
     if (!gFlags.drivesHead && nodes.head && Math.abs(nodes.head.rot) > 0.01) {
       const base = deltas.head?.rot ?? 0;
       nodes.head.rot = lerp(nodes.head.rot, base, 0.12);
     }
+    // decay back_hair independently but keep its head-follow term above
+    if (nodes.back_hair && Math.abs(nodes.back_hair.rot) > 0.01 && !gFlags.drivesHead) {
+      nodes.back_hair.rot = lerp(nodes.back_hair.rot, 0, 0.08);
+    }
+
   // arm layers fade in during arm gestures (they support the sleeve edge);
   // the raised hand itself is drawn by the pose overlay above
-    // wave uses the pre-rendered raised-arm overlay exclusively — the strip
-    // itself would read as a detached pale block at her side, so it stays
-    // hidden during wave. touch/point keep a subtle strip support, play uses
-    // the overlay plus a small strip fade so her sleeve edge connects.
-    // wave and touch/play now use pre-rendered arm overlays exclusively — the
-    // strip at its side would read as a detached block, so it stays hidden for
-    // those gestures. only point keeps a subtle strip motion (forward pulse).
     const armMap = { touch_hair: null, play_hair: null, wave: null, point: 'arm_r' };
     const activeArm = gFlags.drivesArm && currentGesture ? armMap[currentGesture.name] : null;
     for (const armName of ['arm_l', 'arm_r']) {
@@ -479,6 +491,8 @@ export function initSpriteRig(canvasEl) {
       }).join(' ');
       console.log('[sprite-rig] tick', 'gesture=' + (currentGesture ? currentGesture.name : 'none'),
         'vs=' + viewScale.toFixed(3), 'W=' + W, 'H=' + H,
+        'rootOy=' + rootOy.toFixed(2),
+        'headRot=' + (nodes.head ? nodes.head.rot.toFixed(2) : 'n/a'),
         'bodyA=' + (nodes.body ? nodes.body.alpha : -1).toFixed(2),
         'headA=' + (nodes.head ? nodes.head.alpha : -1).toFixed(2),
         'imgs=' + imgStatus);
@@ -514,8 +528,10 @@ export function initSpriteRig(canvasEl) {
     // bounce while the gesture is in its hold phase (0.2..0.8)
     const hold = clamp((t - 0.2) / 0.6, 0, 1);
     const bounceY = hold > 0 && hold < 1 ? overlay.bounce(t) : 0;
-    const ax = viewX + (n.origin[0] - overlay.oyPeak * 0) * vs;
-    const ay = viewY + (n.origin[1] - overlay.oyPeak) * vs + bounceY * vs;
+    // overlays also ride the shared root bob — so the raised hand stays
+    // glued to the body during breathing instead of floating
+    const ax = viewX + (n.origin[0] + rootOx) * vs;
+    const ay = viewY + (n.origin[1] + rootOy - overlay.oyPeak) * vs + bounceY * vs;
     ctx.drawImage(n.img, ax, ay, n.w * vs, n.h * vs);
     ctx.restore();
   }
