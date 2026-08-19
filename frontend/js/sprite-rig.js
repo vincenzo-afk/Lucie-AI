@@ -172,15 +172,15 @@ export function initSpriteRig(canvasEl) {
   addGesture('touch_hair', 3200, (g, t) => {
     if (t < 0.4) {
       const k = EASE.inOutCubic(t / 0.4);
-      g('head').rot = lerp(0, -4, k);           // slight lean toward her right
+      g('head').rot = lerp(0, -7, k);           // lean toward her right hand
     } else if (t < 0.8) {
       const k = (t - 0.4) / 0.4;
-      g('head').rot = -4 + Math.sin(k * Math.PI * 1.5) * 2.5;
+      g('head').rot = -7 + Math.sin(k * Math.PI * 1.5) * 4;
       const hair = g('back_hair');
-      hair.rot = Math.sin(k * Math.PI * 2) * 2.5;
+      hair.rot = Math.sin(k * Math.PI * 2) * 4.5;
     } else {
       const k = EASE.outCubic((t - 0.8) / 0.2);
-      g('head').rot = lerp(-4, 0, k);
+      g('head').rot = lerp(-7, 0, k);
     }
     return { drivesHead: true };
   });
@@ -190,30 +190,54 @@ export function initSpriteRig(canvasEl) {
   addGesture('play_hair', 2600, (g, t) => {
     if (t < 0.35) {
       const k = EASE.inOutCubic(t / 0.35);
-      g('head').rot = lerp(0, 5, k);
+      g('head').rot = lerp(0, 8, k);
     } else if (t < 0.75) {
       const k = (t - 0.35) / 0.4;
-      g('head').rot = 5 + Math.sin(k * Math.PI * 2) * 3;
-      g('back_hair').rot = Math.sin(k * Math.PI * 2.2) * 3;
+      g('head').rot = 8 + Math.sin(k * Math.PI * 2) * 4.5;
+      g('back_hair').rot = Math.sin(k * Math.PI * 2.2) * 5;
     } else {
       const k = EASE.outCubic((t - 0.75) / 0.25);
-      g('head').rot = lerp(5, 0, k);
+      g('head').rot = lerp(8, 0, k);
     }
     return { drivesHead: true };
   });
 
-  addGesture('head_shake', 2000, (g, t) => {
+  addGesture('head_shake', 2200, (g, t) => {
     const head = g('head');
-    const swings = 3;
-    // rotation around the NECK junction — the chin stays pinned to the collar
-    head.rot = Math.sin(t * Math.PI * 2 * swings) * 9 * (1 - t * 0.5);
+    // hold-plateau shape: ease in during first 12%, swing back and forth at
+    // full amplitude while held, then ease back. Pure sin passes through
+    // zero at half-time so it looked static; a held plateau keeps the full
+    // visible swing in view the whole middle of the gesture.
+    if (t < 0.12) {
+      const k = EASE.inOutCubic(t / 0.12);
+      head.rot = 12 * k;
+    } else if (t < 0.88) {
+      const k = (t - 0.12) / 0.76;
+      head.rot = 12 * Math.sin(k * Math.PI * 4.5);   // ~2.25 swings at full amp
+    } else {
+      const k = EASE.inOutCubic((t - 0.88) / 0.12);
+      head.rot = 12 * (1 - k);
+    }
     return { drivesHead: true };
   });
 
-  addGesture('head_nod', 1500, (g, t) => {
+  addGesture('head_nod', 1800, (g, t) => {
     const head = g('head');
-    // two dips, rotating at the neck — the face dips toward the chest
-    head.rot = Math.sin(t * Math.PI * 4) * 7 * (1 - t * 0.4);
+    // two clear held dips: ease down, hold, return. The face dips toward the
+    // chest and stays there long enough to read as an unmistakable nod.
+    if (t < 0.2) {
+      const k = EASE.inOutCubic(t / 0.2);
+      head.rot = 10 * k;
+    } else if (t < 0.45) {
+      const k = (t - 0.2) / 0.25;
+      head.rot = 10 - 4 * Math.abs(Math.sin(k * Math.PI * 2)); // hold with a 2nd pulse
+    } else if (t < 0.65) {
+      const k = EASE.inOutCubic((t - 0.45) / 0.2);
+      head.rot = lerp(6, 10, k);                              // back to the second dip
+    } else {
+      const k = EASE.inOutCubic((t - 0.65) / 0.35);
+      head.rot = 10 * (1 - k);
+    }
     return { drivesHead: true };
   });
 
@@ -223,41 +247,44 @@ export function initSpriteRig(canvasEl) {
   addGesture('wave', 2500, (g, t) => {
     if (t < 0.3) {
       const k = EASE.inOutCubic(t / 0.3);
-      g('head').rot = lerp(0, -5, k);
+      g('head').rot = lerp(0, -8, k);
     } else if (t < 0.85) {
       const k = (t - 0.3) / 0.55;
-      g('head').rot = -5 + Math.sin(k * Math.PI * 4) * 2.5;
+      g('head').rot = -8 + Math.sin(k * Math.PI * 4) * 4;
     } else {
       const k = EASE.outCubic((t - 0.85) / 0.15);
-      g('head').rot = lerp(-5, 0, k);
+      g('head').rot = lerp(-8, 0, k);
     }
     return { drivesHead: true };
   });
 
   // giggle: the WHOLE character (root bob) chuckles in sync with the head —
   // body, head, and hair all move together so no seam ever jumps.
-  addGesture('giggle', 2000, (g, t) => {
+  addGesture('giggle', 2400, (g, t) => {
     const head = g('head');
-    const k = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
-    // whole-character chuckle bob (shared root, so every layer gets it)
-    rootOy += Math.sin(t * Math.PI * 6) * 4.5 * k;
-    head.rot = Math.sin(t * Math.PI * 3) * 4.5 * k;
-    g('back_hair').rot = Math.sin(t * Math.PI * 2.5) * 2.5 * k;
+    const k = t < 0.8 ? 1 : 1 - (t - 0.8) / 0.2;
+    // whole-character chuckle bob (shared root, so every layer gets it).
+    // Two quick shoulder-lift chuckles (sin at 3Hz) held for most of the
+    // gesture so the bob is visible in any frame of the middle section.
+    const chuckle = Math.sin(t * Math.PI * 6);
+    rootOy += chuckle * 6 * k;
+    head.rot = chuckle * 7 * k;
+    g('back_hair').rot = chuckle * 5 * k;
     return { drivesHead: true };
   });
 
   // point: the raised-arm overlay does the pointing; the head gives a tiny
   // tilt in the same direction. No strip sliding — nothing leaves the body.
   addGesture('point', 1500, (g, t) => {
-    if (t < 0.35) {
-      const k = EASE.outCubic(t / 0.35);
-      g('head').rot = lerp(0, -4, k);
-    } else if (t < 0.65) {
-      const pulse = Math.sin((t - 0.35) * Math.PI * 4) * 1.5;
-      g('head').rot = -4 + pulse;
+    if (t < 0.3) {
+      const k = EASE.outCubic(t / 0.3);
+      g('head').rot = lerp(0, -7, k);
+    } else if (t < 0.7) {
+      const pulse = Math.sin((t - 0.3) * Math.PI * 4) * 3;
+      g('head').rot = -7 + pulse;                              // held tilt + 2 pulses
     } else {
-      const k = EASE.outCubic((t - 0.65) / 0.35);
-      g('head').rot = lerp(-4, 0, k);
+      const k = EASE.outCubic((t - 0.7) / 0.3);
+      g('head').rot = lerp(-7, 0, k);
     }
     return { drivesHead: true };
   });
@@ -274,19 +301,19 @@ export function initSpriteRig(canvasEl) {
     const b = emotionBlend; // how far we are toward the target emotion
     switch (emotion) {
       case 'happy':
-        return { head: { rot: 4 * b }, blush: { alpha: 0.55 * b } };
+        return { head: { rot: 6 * b }, blush: { alpha: 0.55 * b } };
       case 'sad':
-        return { head: { rot: -4 * b } };
+        return { head: { rot: -6 * b } };
       case 'surprised':
-        return { head: { rot: -3 * b } };
+        return { head: { rot: -5 * b } };
       case 'blush':
-        return { blush: { alpha: b }, head: { rot: 4 * b } };
+        return { blush: { alpha: b }, head: { rot: 6 * b } };
       case 'laugh':
-        // subtle tilt only — the chuckle bob comes from the shared root,
-        // never from a jittery per-layer rotation (removed in v4)
-        return { head: { rot: 2 * b } };
+        // gentle rhythmic tilt — synced to the shared root chuckle bob,
+        // never a jittery micro-shake (removed in v4)
+        return { head: { rot: 4 * b } };
       case 'worried':
-        return { head: { rot: 3 * b } };
+        return { head: { rot: 5 * b } };
       default:
         return { blush: { alpha: 0 } };
     }
@@ -402,11 +429,11 @@ export function initSpriteRig(canvasEl) {
     breathPhase += 0.0022; // ~1 breath per ~4.5s
     driftPhase += 0.0015;
     hairPhase += 0.003;
-    rootOy = Math.sin(breathPhase) * 1.8;          // unified px (~1.8px)
-    rootOx = Math.sin(driftPhase) * 0.6;           // whole-character drift
-    // back_hair sways slightly AND follows the head; never on its own
+    rootOy = Math.sin(breathPhase) * 4.5;          // unified px (~4.5px visible bob)
+    rootOx = Math.sin(driftPhase) * 1.5;           // whole-character drift
+    // back_hair sways AND follows the head; never on its own
     if (nodes.back_hair) {
-      nodes.back_hair.rot = (Math.sin(hairPhase) * 1.6) + (nodes.head ? nodes.head.rot * 0.25 : 0);
+      nodes.back_hair.rot = (Math.sin(hairPhase) * 4) + (nodes.head ? nodes.head.rot * 0.3 : 0);
     }
     // no per-layer sy/ox breathing anymore — the root bob carries it all
 
@@ -502,9 +529,9 @@ export function initSpriteRig(canvasEl) {
   // Pose overlays map: which overlay layer belongs to which arm gesture,
   // and the idle bounce applied to it while active.
   const POSE_OVERLAYS = {
-    touch_hair: { node: 'arm_r_touch', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 4 },
-    wave: { node: 'arm_r_wave', oyPeak: 12, bounce: (k) => Math.sin(k * Math.PI * 6) * 7 },
-    play_hair: { node: 'arm_l_play', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 4 },
+    touch_hair: { node: 'arm_r_touch', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 7 },
+    wave: { node: 'arm_r_wave', oyPeak: 12, bounce: (k) => Math.sin(k * Math.PI * 6) * 10 },
+    play_hair: { node: 'arm_l_play', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 7 },
   };
 
   function drawPoseOverlays(now) {
