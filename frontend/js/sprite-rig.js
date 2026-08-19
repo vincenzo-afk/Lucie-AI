@@ -1,4 +1,5 @@
-// sprite-rig.js — Luna, a custom rigged 2D anime girl (v2, seamless layers).
+// sprite-rig.js — Luna, a custom rigged 2D anime girl (v3, seamless layers +
+// pre-rendered raised-arm pose overlays for the big arm gestures).
 //
 // All layers are native-size crops cut from ONE unified artwork
 // (unified_base.png 1632x2176). Each layer keeps its exact source origin, so
@@ -23,6 +24,10 @@
 const MANIFEST_SRC = 'model/luna/manifest.json';
 
 // Draw order: back_hair -> body -> arm_l -> arm_r -> head -> blush -> mouth
+// Pose overlays (arm_r_touch, arm_r_wave, arm_l_play) are static crops cut
+// from bent-arm variants of the same unified artwork; they draw at their
+// manifest origin during the matching gesture (small bounce added), so the
+// raised hand reads as a real hand with no rotation sweep artifact.
 // Pivot (cx, cy) in each layer's own pixel space:
 //   body       (748, 1053) — torso center (breathing pivot)
 //   arm_l      (326,   0)  — shoulder top (arm hangs down; raising rotates)
@@ -36,6 +41,9 @@ const PIVOTS = {
   arm_r: [197, 0],
   head: [522, 0],
   blush: [420, 80],
+  arm_r_wave: [0, 0],
+  arm_r_touch: [0, 0],
+  arm_l_play: [0, 0],
 };
 
 // Mouth patch: head-layer-local px of the smile center.
@@ -71,10 +79,10 @@ class Node {
   }
 }
 
-// Arms are drawn ONLY during gestures (fade in/out) so that the rest pose stays
-// perfectly clean — the arm crops contain torso fabric that can't be fully
-// separated from the artwork without regenerating it. Gestures still raise
-// the hand convincingly for the gesture's duration.
+  // Arm layers are drawn only during their gesture (fade in/out) so the rest
+// pose stays perfectly clean. The raised-hand motion itself comes from
+// pose overlay layers (arm_r_touch / arm_r_wave / arm_l_play) cut from
+// bent-arm variants of the unified artwork, not from rotating the strip.
 
 export function initSpriteRig(canvasEl) {
   const ctx = canvasEl.getContext('2d');
@@ -83,12 +91,14 @@ export function initSpriteRig(canvasEl) {
 
   // --- load assets ----------------------------------------------------------
   // cache-buster: bump ASSET_VER whenever layer PNGs change
-  const ASSET_VER = 16;
+  const ASSET_VER = 18;
 
   function loadAsset(name, src) {
     return new Promise((resolve) => {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      // NOTE: no crossOrigin attribute — this rig draws to the canvas from
+      // same-origin local assets; setting crossOrigin without a CORS header
+      // taints the canvas in headless Chromium and silently blanks exports.
       img.onload = () => {
         nodes[name] = new Node(name, img, manifest, PIVOTS[name]);
         if (name === 'arm_l' || name === 'arm_r') nodes[name].alpha = 0;
@@ -110,6 +120,8 @@ export function initSpriteRig(canvasEl) {
   let gestureQueue = [];
   let currentGesture = null;
   let blink = { active: false, startedAt: 0, nextAt: 0 };
+  let hbCounter = 0;
+  let sampleCounter = 0;
   let breathPhase = Math.random() * Math.PI * 2;
   let driftPhase = Math.random() * Math.PI * 2;
   let hairPhase = Math.random() * Math.PI * 2;
@@ -144,83 +156,71 @@ export function initSpriteRig(canvasEl) {
     if (!currentGesture) currentGesture = gestureQueue.shift();
   }
 
-  // touch_hair: right arm slides up along her side and reaches her side lock,
-  // with two soft strokes and hair sway. Motion is mostly vertical (the arm
-  // keeps its straight pose from the artwork) with a tiny lean toward the
-  // lock; the big rotation sweeps that caused the blocky artifact are gone.
+    // touch_hair: right arm swings as an arc from the shoulder (pivot rotation,
+  // never a slide) so the hand stays attached at the shoulder the whole time
+  // and the hand sweeps up to stroke her side lock, with two soft strokes.
+  // touch_hair: the pre-rendered bent-arm overlay draws the hand already at
+  // her hair; only a tiny rotation nudge (+ strokes on the hair) sells motion.
   addGesture('touch_hair', 3200, (g, t) => {
-    const arm = g('arm_r');
-    if (t < 0.45) {
-      const k = EASE.inOutCubic(t / 0.45);
-      arm.oy = lerp(0, -330, k);             // slide the arm up toward her hair
-      arm.ox = lerp(0, -70, k);              // lean slightly toward the lock
-      arm.sy = lerp(1, 0.72, k);             // forearm-fold illusion
-      arm.rot = lerp(0, -6, k);              // tiny lean, no big sweep
+    if (t < 0.35) {
+      const k = EASE.inOutCubic(t / 0.35);
+      g('arm_r').rot = lerp(0, -5, k);
     } else if (t < 0.75) {
-      const k = (t - 0.45) / 0.30;
-      arm.oy = -330 + Math.sin(k * Math.PI * 2.5) * 14; // two strokes
-      arm.ox = -70 + Math.sin(k * Math.PI * 2.5) * 6;
+      const k = (t - 0.35) / 0.40;
+      g('arm_r').rot = -5 + Math.sin(k * Math.PI * 2.5) * 2;
       const hair = g('back_hair');
       hair.rot = Math.sin(k * Math.PI * 3) * 4;
     } else {
       const k = EASE.outCubic((t - 0.75) / 0.25);
-      arm.oy = lerp(-330, 0, k);
-      arm.ox = lerp(-70, 0, k);
-      arm.sy = lerp(0.72, 1, k);
-      arm.rot = lerp(-6, 0, k);
+      g('arm_r').rot = lerp(-5, 0, k);
     }
+    return { drivesArm: true };
   });
-
-  // play_hair: left arm slides up to twirl her other side lock.
+  // play_hair: left arm swings up from her shoulder to twirl her other lock.
   addGesture('play_hair', 2600, (g, t) => {
     const arm = g('arm_l');
     if (t < 0.4) {
       const k = EASE.inOutCubic(t / 0.4);
-      arm.oy = lerp(0, -330, k);
-      arm.ox = lerp(0, 70, k);               // lean toward her left lock
-      arm.sy = lerp(1, 0.72, k);
-      arm.rot = lerp(0, 6, k);
+      arm.rot = lerp(0, 14, k);
     } else if (t < 0.7) {
       const k = (t - 0.4) / 0.3;
-      arm.oy = -330 + Math.sin(k * Math.PI * 2) * 14;   // twirl strokes
-      arm.ox = 70 + Math.sin(k * Math.PI * 2) * 6;
+      arm.rot = 14 + Math.sin(k * Math.PI * 2) * 4;     // twirl strokes
       const hair = g('back_hair');
       hair.rot = Math.sin(k * Math.PI * 2.5) * 3.5;
     } else {
       const k = EASE.outCubic((t - 0.7) / 0.3);
-      arm.oy = lerp(-330, 0, k);
-      arm.ox = lerp(70, 0, k);
-      arm.sy = lerp(0.72, 1, k);
-      arm.rot = lerp(6, 0, k);
+      arm.rot = lerp(14, 0, k);
     }
+    return { drivesArm: true };
   });
 
   addGesture('head_shake', 2000, (g, t) => {
     const head = g('head');
     const swings = 3;
     head.rot = Math.sin(t * Math.PI * 2 * swings) * 9 * (1 - t * 0.5);
+    return { drivesHead: true };
   });
-
   addGesture('head_nod', 1500, (g, t) => {
     const head = g('head');
     head.rot = Math.sin(t * Math.PI * 2) * 7 * (1 - t);
+    return { drivesHead: true };
   });
 
+  // wave: pre-rendered raised-arm overlay (hand up beside head) bounces with
+  // the hand while waving; the strip itself only rotates a few degrees.
   addGesture('wave', 2500, (g, t) => {
     const arm = g('arm_r');
     if (t < 0.3) {
       const k = EASE.inOutCubic(t / 0.3);
-      arm.oy = lerp(0, -380, k);             // lift the arm up beside her head
-      arm.rot = lerp(0, -16, k);             // outward tilt
+      arm.rot = lerp(0, -6, k);
     } else if (t < 0.85) {
       const k = (t - 0.3) / 0.55;
-      arm.rot = -16 + Math.sin(k * Math.PI * 5) * 12; // waving
-      arm.oy = -380 + Math.sin(k * Math.PI * 5) * 10;
+      arm.rot = -6 + Math.sin(k * Math.PI * 2) * 3;
     } else {
       const k = EASE.outCubic((t - 0.85) / 0.15);
-      arm.oy = lerp(-380, 0, k);
-      arm.rot = lerp(-16, 0, k);
+      arm.rot = lerp(-6, 0, k);
     }
+    return { drivesArm: true };
   });
 
   addGesture('giggle', 2000, (g, t) => {
@@ -230,23 +230,29 @@ export function initSpriteRig(canvasEl) {
     body.oy = Math.sin(t * Math.PI * 6) * 5 * k;      // bouncing
     head.rot = Math.sin(t * Math.PI * 4) * 5 * k;
     head.sy = lerp(1, 1.03, Math.abs(Math.sin(t * Math.PI * 3)) * k);
+    return { drivesHead: true };
   });
 
+  // point: small rotation nudge (subtle, no visible sweep at -8deg) plus a
+  // quick forward-outward pulse.
   addGesture('point', 1500, (g, t) => {
     const arm = g('arm_r');
     if (t < 0.35) {
       const k = EASE.outCubic(t / 0.35);
-      arm.rot = lerp(0, -8, k);              // extend out toward viewer
-      arm.ox = lerp(0, -60, k);
-      arm.oy = lerp(0, -40, k);
+      arm.rot = lerp(0, -8, k);
+      arm.oy = lerp(0, -45, k);
+      arm.ox = lerp(0, -30, k);
     } else if (t < 0.65) {
-      arm.rot = -8 + Math.sin((t - 0.35) * Math.PI * 4) * 4;
+      const pulse = Math.sin((t - 0.35) * Math.PI * 4) * 2;
+      arm.rot = -8 + pulse;
+      arm.oy = -45 + Math.sin((t - 0.35) * Math.PI * 4) * 8;
     } else {
       const k = EASE.outCubic((t - 0.65) / 0.35);
       arm.rot = lerp(-8, 0, k);
-      arm.ox = lerp(-60, 0, k);
-      arm.oy = lerp(-40, 0, k);
+      arm.oy = lerp(-45, 0, k);
+      arm.ox = lerp(-30, 0, k);
     }
+    return { drivesArm: true };
   });
 
   addGesture('blush', 2400, (g, t) => {
@@ -376,6 +382,7 @@ export function initSpriteRig(canvasEl) {
   }
 
   function renderFrame(now) {
+    try {
     ctx.clearRect(0, 0, W, H);
     // background is transparent by design (canvas alpha preserved)
 
@@ -412,33 +419,40 @@ export function initSpriteRig(canvasEl) {
       if (delta.oy !== undefined) n.oy += delta.oy * 0.1;
       if (delta.alpha !== undefined) n.alpha = lerp(n.alpha, delta.alpha, 0.1);
     }
-    // decay head rot back to idle when no emotion/gesture drives it
-    if (nodes.head && Math.abs(nodes.head.rot) > 0.01) {
-      const base = deltas.head?.rot ?? 0;
-      nodes.head.rot = lerp(nodes.head.rot, base, 0.12);
-    }
-
-    // gesture update
+        // gesture update
+    let gFlags = {};
     if (currentGesture) {
       const t = clamp((now - currentGesture.start) / currentGesture.duration, 0, 1);
-      const eased = EASE.inOutCubic(t);
-      currentGesture.fn(bone, eased);
-      if (t >= 1) {
+      gFlags = currentGesture.fn(bone, t) || {};
+            if (t >= 1) {
         currentGesture = gestureQueue.shift() || null;
       }
     }
-
-    // arm fade: arms hidden at rest, fade in while an arm gesture runs,
-    // fade out shortly after the gesture queue empties
-    // which arm each gesture animates (the other arm stays hidden at rest)
-    const armMap = { touch_hair: 'arm_r', play_hair: 'arm_l', wave: 'arm_r', point: 'arm_r' };
-    const activeArm = currentGesture ? armMap[currentGesture.name] : null;
+    // decay head rot back to idle when no emotion/gesture drives it
+    if (!gFlags.drivesHead && nodes.head && Math.abs(nodes.head.rot) > 0.01) {
+      const base = deltas.head?.rot ?? 0;
+      nodes.head.rot = lerp(nodes.head.rot, base, 0.12);
+    }
+  // arm layers fade in during arm gestures (they support the sleeve edge);
+  // the raised hand itself is drawn by the pose overlay above
+    // wave uses the pre-rendered raised-arm overlay exclusively — the strip
+    // itself would read as a detached pale block at her side, so it stays
+    // hidden during wave. touch/point keep a subtle strip support, play uses
+    // the overlay plus a small strip fade so her sleeve edge connects.
+    // wave and touch/play now use pre-rendered arm overlays exclusively — the
+    // strip at its side would read as a detached block, so it stays hidden for
+    // those gestures. only point keeps a subtle strip motion (forward pulse).
+    const armMap = { touch_hair: null, play_hair: null, wave: null, point: 'arm_r' };
+    const activeArm = gFlags.drivesArm && currentGesture ? armMap[currentGesture.name] : null;
     for (const armName of ['arm_l', 'arm_r']) {
       if (!nodes[armName]) continue;
       const target = armName === activeArm ? 1 : 0;
-      const k = armName === activeArm ? 0.25 : 0.12;
+      const k = armName === activeArm ? 0.35 : 0.12;
       nodes[armName].alpha = lerp(nodes[armName].alpha, target, k);
     }
+
+    // pose overlays: draw the raised-arm crop during its matching gesture
+    drawPoseOverlays(now);
 
     updateBlink(now);
 
@@ -446,6 +460,64 @@ export function initSpriteRig(canvasEl) {
     const order = ['back_hair', 'body', 'arm_l', 'arm_r', 'head', 'blush'];
     for (const name of order) if (nodes[name]) drawNode(nodes[name]);
     if (nodes.head) drawMouth();
+    } catch (e) { console.error('[sprite-rig] renderFrame error:', e); }
+    hbCounter++;
+    sampleCounter++;
+    if (sampleCounter >= 1200) {
+      sampleCounter = 0;
+      try {
+        const sp = ctx.getImageData(Math.floor(W / 2), Math.floor(H / 2), 20, 20).data;
+        let mx = 0;
+        for (let i = 0; i < sp.length; i += 4) mx = Math.max(mx, sp[i + 3]);
+        console.log('[sprite-rig] sample alphaAtCenter=' + mx);
+      } catch (e) { console.log('[sprite-rig] sample fail:', e.message); }
+    }
+    if (hbCounter % 40 === 0) {
+      const imgStatus = Object.keys(nodes).map(k => {
+        const n = nodes[k];
+        return k + '=' + (n.img ? (n.img.complete ? 'c' : 'p') + (n.img.naturalWidth || 0) : 'x');
+      }).join(' ');
+      console.log('[sprite-rig] tick', 'gesture=' + (currentGesture ? currentGesture.name : 'none'),
+        'vs=' + viewScale.toFixed(3), 'W=' + W, 'H=' + H,
+        'bodyA=' + (nodes.body ? nodes.body.alpha : -1).toFixed(2),
+        'headA=' + (nodes.head ? nodes.head.alpha : -1).toFixed(2),
+        'imgs=' + imgStatus);
+    }
+  }
+
+  // Pose overlays map: which overlay layer belongs to which arm gesture,
+  // and the idle bounce applied to it while active.
+  const POSE_OVERLAYS = {
+    touch_hair: { node: 'arm_r_touch', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 4 },
+    wave: { node: 'arm_r_wave', oyPeak: 12, bounce: (k) => Math.sin(k * Math.PI * 6) * 7 },
+    play_hair: { node: 'arm_l_play', oyPeak: 0, bounce: (k) => Math.sin(k * Math.PI * 2) * 4 },
+  };
+
+  function drawPoseOverlays(now) {
+    if (!currentGesture || !POSE_OVERLAYS[currentGesture.name]) return;
+    const t = clamp((now - currentGesture.start) / currentGesture.duration, 0, 1);
+    // fade in during the first 20%, fade out during the last 20%
+    let fade = 1;
+    if (t < 0.2) fade = EASE.outCubic(t / 0.2);
+    else if (t > 0.8) fade = 1 - EASE.inOutCubic((t - 0.8) / 0.2);
+    const overlay = POSE_OVERLAYS[currentGesture.name];
+    const n = nodes[overlay.node];
+    if (!n || !n.img || !n.img.complete) {
+      console.log('[sprite-rig] overlay skip:', overlay.node, n ? 'incomplete' : 'missing node');
+      return;
+    }
+    const vs = viewScale;
+    // appearance: fade the overlay's own alpha via globalAlpha
+    ctx.save();
+    ctx.globalAlpha = clamp(fade, 0, 1);
+    // static origin placement (like drawNode, no rotation), plus a gentle
+    // bounce while the gesture is in its hold phase (0.2..0.8)
+    const hold = clamp((t - 0.2) / 0.6, 0, 1);
+    const bounceY = hold > 0 && hold < 1 ? overlay.bounce(t) : 0;
+    const ax = viewX + (n.origin[0] - overlay.oyPeak * 0) * vs;
+    const ay = viewY + (n.origin[1] - overlay.oyPeak) * vs + bounceY * vs;
+    ctx.drawImage(n.img, ax, ay, n.w * vs, n.h * vs);
+    ctx.restore();
   }
 
   // --- ticker ---------------------------------------------------------------
@@ -468,7 +540,10 @@ export function initSpriteRig(canvasEl) {
       // y 640..800 (placed as a fixed-origin overlay, NOT in the layer manifest)
       manifest.blush = { origin: [400, 640], size: [840, 160] };
       const assetNames = Object.keys(m);
-      return Promise.all(assetNames.map((name) => loadAsset(name, `model/luna/${name}.png`)));
+      // diagnostic experiment: skip the pose-overlay PNGs entirely
+      const SKIP_OVERLAYS = /skipOverlays=1/.test(location.search);
+      const skipNames = SKIP_OVERLAYS ? ['arm_r_wave', 'arm_r_touch', 'arm_l_play'] : [];
+      return Promise.all(assetNames.filter((n) => !skipNames.includes(n)).map((name) => loadAsset(name, `model/luna/${name}.png`)));
     })
     .then(() => loadAsset('blush', 'model/luna/blush.png'))
     .then(() => {
