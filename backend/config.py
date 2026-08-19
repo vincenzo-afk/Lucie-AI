@@ -22,8 +22,7 @@ if not GROQ_API_KEY:
 
 VALID_EMOTIONS = {"happy", "sad", "surprised", "blush", "laugh", "worried", "neutral"}
 
-# Gestures the avatar can play (used by both the Live2D emotion animator and
-# Luna's custom sprite rig). The LLM picks one per reply to make Lucie/Luna
+# Gestures the avatar can play (the LLM picks one per reply to make Lucie
 # more physically expressive (touching hair, waving, giggling, ...).
 VALID_GESTURES = {
     "touch_hair", "play_hair", "head_shake", "head_nod", "wave",
