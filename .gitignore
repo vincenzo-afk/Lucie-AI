@@ -15,3 +15,13 @@ frontend/model/*
 .DS_Store
 .vscode/
 .idea/
+
+# Data & Logs
+data/memory.json
+*.log
+
+# Build & Deploy
+.render/
+build/
+dist/
+node_modules/
