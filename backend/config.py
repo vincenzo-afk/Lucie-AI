@@ -1,7 +1,6 @@
 """
-Central configuration for the Lucie AI Companion backend.
-Loads everything from environment variables (.env) so no secrets
-ever live in source code.
+Central configuration for the Hiyori-AI backend.
+All settings are loaded from environment variables to ensure security.
 """
 import os
 from dotenv import load_dotenv
@@ -22,8 +21,8 @@ if not GROQ_API_KEY:
 
 VALID_EMOTIONS = {"happy", "sad", "surprised", "blush", "laugh", "worried", "neutral"}
 
-# Gestures the avatar can play (the LLM picks one per reply to make Lucie
-# more physically expressive (touching hair, waving, giggling, ...).
+# Gestures the avatar can play (the LLM picks one per reply to make the avatar
+# more physically expressive).
 VALID_GESTURES = {
     "touch_hair", "play_hair", "head_shake", "head_nod", "wave",
     "giggle", "point", "blush", "none",
